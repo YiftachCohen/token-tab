@@ -1,7 +1,7 @@
-# Token Tab — SwiftBar plugin
+# Token Tab: SwiftBar plugin
 
 The fast on-ramp: get your token tab in the menu bar tonight, no app to build or sign.
-(The native sandboxed app is the long-term keeper — see the root README. This path
+(The native sandboxed app is the long-term keeper; see the root README. This path
 trades the scoped-read trust story for speed: **SwiftBar itself may need Full Disk
 Access** to read `~/.claude`, which is a broader grant than the native app asks for.)
 
@@ -24,7 +24,7 @@ Access** to read `~/.claude`, which is a broader grant than the native app asks 
 
 ## Troubleshooting
 - **Nothing shows / blank:** SwiftBar may need **Full Disk Access** to read
-  `~/.claude/projects` — System Settings → Privacy & Security → Full Disk Access → add
+  `~/.claude/projects`. System Settings → Privacy & Security → Full Disk Access → add
   SwiftBar. (This broad grant is exactly why the native app exists.)
 - **"No node/bun found":** install Node (`brew install node`) or Bun.
 - **Custom log location:** set `TOKENTAB_LOG_DIR` in the plugin's environment, or rely

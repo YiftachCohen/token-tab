@@ -1,13 +1,12 @@
 # Token Tab
 
-A provably-safe AI usage meter for the macOS menu bar. It shows your "tab" — the
-tokens (later: dollars and rate-limit runway) you've spent with Claude Code — by
-reading the session logs already on your disk.
+Token Tab shows your Claude Code token usage in the macOS menu bar: tokens now, with
+dollars and rate-limit runway to come. It reads the session logs Claude Code already
+writes on disk, so it needs no API keys, no keychain access, and no AWS credentials,
+and it makes no network calls.
 
-The pitch is not "another usage meter." Those exist (`ccusage`, CodexBar). The pitch
-is **a usage meter you can put on a work laptop without worrying.** It makes no network
-connections, asks for no keychain access, no API keys, no AWS credentials, and keeps
-none of your prompt or response text.
+It reads only the usage numbers. Your prompts and code never leave your machine,
+because the app has no way to send them anywhere.
 
 > Status: early. The CLI + SwiftBar plugin work today and reconcile with `ccusage` to
 > within 0.003%. The native sandboxed menu-bar app is the roadmap (see below).
@@ -18,7 +17,7 @@ none of your prompt or response text.
 - Counts tokens per model, per surface (subscription / Bedrock), and per time window
   (today / this week / last 5h).
 - Works the same whether Claude Code talks to the Anthropic API, a subscription
-  (Max/Pro), or **AWS Bedrock** — the token counts are in the local logs either way,
+  (Max/Pro), or **AWS Bedrock**. The token counts are in the local logs either way,
   so no AWS credentials are needed to read them.
 
 ## The trust model (the whole point)
@@ -27,7 +26,7 @@ Honest claims, each verifiable:
 
 - **It cannot phone home.** No network code, no dependencies. (The native app will make
   this OS-enforced via App Sandbox with no network entitlement.)
-- **It never reads your content.** The parser decodes only the metadata it needs —
+- **It never reads your content.** The parser decodes only the metadata it needs:
   `type`, `model`, `message.id`, `requestId`, `usage`, `timestamp`, `isSidechain`. It
   never touches `message.content` (your prompts, code, and responses).
 - **It keeps nothing.** No cache, no telemetry, no files written.
@@ -52,7 +51,7 @@ grep -RnE "fetch|http|https|net\.|URLSession|Socket|dns" src/
 grep -RnE "\.content" src/ | grep -v "//"
 
 # 4. Confirm the parser reads only metadata: see `recordFromLine` in src/core.mjs
-#    — it returns message.id, model, usage, timestamp, isSidechain. Never content.
+#    It returns message.id, model, usage, timestamp, isSidechain. Never content.
 
 # 5. Read the whole thing. core.mjs + token-tab.mjs are ~340 lines total.
 ```
@@ -87,8 +86,8 @@ Validated against [`ccusage`](https://github.com/ryoppippi/ccusage) on real logs
 
 ## Configuration
 
-- `TOKENTAB_LOG_DIR` — point at a non-default log directory.
-- `CLAUDE_CONFIG_DIR` — respected (reads `$CLAUDE_CONFIG_DIR/projects`).
+- `TOKENTAB_LOG_DIR`: point at a non-default log directory.
+- `CLAUDE_CONFIG_DIR`: respected (reads `$CLAUDE_CONFIG_DIR/projects`).
 - Default: `~/.claude/projects`.
 
 ## Limitations / roadmap
@@ -103,7 +102,7 @@ Validated against [`ccusage`](https://github.com/ryoppippi/ccusage) on real logs
 ## Develop
 
 ```sh
-npm test     # node --test — golden-fixture suite for the parser core
+npm test     # node --test, golden-fixture suite for the parser core
 ```
 
 Architecture: `src/core.mjs` is a pure, I/O-free parser (so tests pin every edge case
