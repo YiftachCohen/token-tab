@@ -135,6 +135,12 @@ function dominantSurface(bySurface) {
   return best || "untracked";
 }
 
+// Opt-in live usage is OFF unless TOKENTAB_LIVE is truthy. Forgiving on value so
+// `TOKENTAB_LIVE=true` (etc.) doesn't silently no-op; `=1` is the canonical form.
+function isLiveEnabled(v) {
+  return typeof v === "string" && /^(1|true|yes|on)$/i.test(v.trim());
+}
+
 async function main() {
   loadLocalConfig();
   const mode = process.argv.includes("--json")
@@ -162,8 +168,27 @@ async function main() {
   const cap = Number(process.env.TOKENTAB_WINDOW_CAP);
   const agg = aggregate(records, { cap: Number.isFinite(cap) && cap > 0 ? cap : undefined });
 
+  // Opt-in live usage. Computed ONCE, before any render branch, and only when
+  // enabled — the live adapter (the sole subprocess user, fenced under adapters/,
+  // outside the audited core) is dynamically imported so the default path never
+  // loads it. Fails closed to null: a missing/broken adapter never breaks the report.
+  const liveEnabled = isLiveEnabled(process.env.TOKENTAB_LIVE);
+  let live = null;
+  if (liveEnabled) {
+    try {
+      const { readLiveUsage } = await import("../adapters/claude-live.mjs");
+      live = await readLiveUsage();
+    } catch {
+      live = null;
+    }
+  }
+
   if (mode === "json") {
-    console.log(JSON.stringify({ ...agg, files: files.length, parseErrors: parseErrors.length }, null, 2));
+    // Default (flag unset) output stays byte-for-byte identical: `live` is only
+    // appended when present, never as `live: null`, and `window` is untouched.
+    const out = { ...agg, files: files.length, parseErrors: parseErrors.length };
+    if (live) out.live = live;
+    console.log(JSON.stringify(out, null, 2));
     return;
   }
 
@@ -177,10 +202,26 @@ async function main() {
     console.log(`◧ ${abbrev(agg.today)}`);
     console.log("---");
     if (surface === "subscription") {
-      console.log(`5h window: ${w.tokens.toLocaleString()} tokens${w.pct != null ? ` · ${w.pct}%` : ""}`);
-      console.log(`${w.active ? `Resets in ${fmtDur(w.msToReset)}` : "Window idle"}${w.pct != null ? " · cap from config" : ""} | color=gray`);
-      if (w.pct == null) console.log("For a %, set TOKENTAB_WINDOW_CAP to your plan cap (from Claude /usage) | color=gray");
-      console.log("---");
+      if (live) {
+        // Live server numbers are authoritative, so they headline; the local
+        // estimate is demoted to one gray line so two competing "5h window"
+        // percentages never sit side by side.
+        console.log(`5h window: ${live.sessionPct}% used · live (claude /usage)`);
+        if (live.sessionResetText) console.log(`Resets ${live.sessionResetText} | color=gray`);
+        if (live.weeklyPct != null) console.log(`This week: ${live.weeklyPct}% used · live`);
+        for (const [m, p] of Object.entries(live.weeklyByModel || {}))
+          console.log(`This week (${m}): ${p}% used · live | color=gray`);
+        console.log(`local estimate: ${w.tokens.toLocaleString()} tokens${w.pct != null ? ` · ${w.pct}%` : ""} | color=gray`);
+        console.log("---");
+      } else {
+        console.log(`5h window: ${w.tokens.toLocaleString()} tokens${w.pct != null ? ` · ${w.pct}%` : ""}`);
+        console.log(`${w.active ? `Resets in ${fmtDur(w.msToReset)}` : "Window idle"}${w.pct != null ? " · cap from config" : ""} | color=gray`);
+        if (w.pct == null) console.log("For a %, set TOKENTAB_WINDOW_CAP to your plan cap (from Claude /usage) | color=gray");
+        // Flag set but the live read failed (e.g. claude not resolvable, parse
+        // miss): say so instead of silently looking like live was never requested.
+        if (liveEnabled) console.log("live unavailable — using local estimate | color=gray");
+        console.log("---");
+      }
     }
     console.log(`Today: ${agg.today.toLocaleString()} tokens`);
     console.log(`This week: ${agg.thisWeek.toLocaleString()}`);
@@ -206,6 +247,17 @@ async function main() {
       `   ${w.active ? "resets in " + fmtDur(w.msToReset) : "(idle)"}`,
   );
   line("");
+  if (live) {
+    line("  live · claude /usage " + "─".repeat(29));
+    line(`    session: ${live.sessionPct}% used${live.sessionResetText ? `   resets ${live.sessionResetText}` : ""}`);
+    if (live.weeklyPct != null)
+      line(`    week:    ${live.weeklyPct}% used${live.weeklyResetText ? `   resets ${live.weeklyResetText}` : ""}`);
+    for (const [m, p] of Object.entries(live.weeklyByModel || {})) line(`    week (${m}): ${p}% used`);
+    line("");
+  } else if (liveEnabled) {
+    line("  live unavailable — using local estimate (set TOKENTAB_LIVE_DEBUG=1 for the reason)");
+    line("");
+  }
   line(`  Surface: ${surface} (dominant)`);
   for (const [s, n] of Object.entries(agg.bySurface).sort((a, b) => b[1] - a[1]))
     line(`    ${s.padEnd(13)} ${abbrev(n).padStart(8)}`);

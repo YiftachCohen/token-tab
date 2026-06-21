@@ -46,6 +46,11 @@ cat package.json | grep -A1 dependencies          # -> {}
 # 2. No network, ever (prints nothing):
 grep -RnE "fetch|http|https|net\.|URLSession|Socket|dns" src/
 
+# 2b. No subprocess in the audited core (prints nothing). The opt-in live
+#     adapter is fenced under adapters/, NOT in src/, so the core stays a clean
+#     sweep even with live enabled:
+grep -RnE "child_process|spawn|execFile" src/
+
 # 3. It never reads content. The only `.content` mention is a comment, not code
 #    (prints nothing):
 grep -RnE "\.content" src/ | grep -v "//"
@@ -53,7 +58,10 @@ grep -RnE "\.content" src/ | grep -v "//"
 # 4. Confirm the parser reads only metadata: see `recordFromLine` in src/core.mjs
 #    It returns message.id, model, usage, timestamp, isSidechain. Never content.
 
-# 5. Read the whole thing. core.mjs + token-tab.mjs are ~340 lines total.
+# 5. Read the whole thing. The audited core (core.mjs + token-tab.mjs +
+#    live-parse.mjs) is pure parsing and rendering. The ONLY subprocess in the
+#    repo is adapters/claude-live.mjs (the opt-in live path), audited separately:
+grep -RnE "child_process|spawn|execFile" adapters/   # -> only adapters/claude-live.mjs
 ```
 
 (When the native `.app` ships, the audit adds `codesign -d --entitlements :- TokenTab.app`
@@ -91,6 +99,12 @@ Validated against [`ccusage`](https://github.com/ryoppippi/ccusage) on real logs
 - `TOKENTAB_WINDOW_CAP`: your plan's 5h token cap, to show a window `%`. If unset, only
   the exact reset countdown shows (no guessed `%`). Derive it from Claude's `/usage`
   (see below).
+- `TOKENTAB_LIVE`: opt in to the authoritative live server `%` via `claude -p "/usage"`
+  (`1`/`true`/`yes`/`on`; canonical `=1`). Off by default. See "The live server %" below.
+- `TOKENTAB_CLAUDE_BIN`: absolute path to the `claude` binary, when it isn't auto-resolved
+  (SwiftBar's minimal PATH usually needs this).
+- `TOKENTAB_LIVE_DEBUG`: when set, prints the reason live data was unavailable to stderr
+  (diagnostic only; never stored).
 - Set any of these as env vars, **or** in a local `KEY=VALUE` file kept out of the repo:
   `~/.config/token-tab/env` (or `~/.token-tab.env`). Only `TOKENTAB_*` keys are read;
   real env vars take precedence. This is where your cap lives so it never gets committed.
@@ -112,9 +126,31 @@ of the block.
   used", and set the cap to `current-window-tokens / (N/100)`. For example, 20M at 5% ⇒
   `TOKENTAB_WINDOW_CAP=400000000`.
 
-The **live** server-`%` (what Claude's `/usage` and CodexBar show) needs an
-authenticated network call, so it is intentionally **not** in the default build. It's a
-planned **opt-in** that would phone home; the default stays provably local.
+## The live server % (opt-in)
+
+The **live** server-`%` (what Claude's `/usage` and CodexBar show) is available as an
+**opt-in** with `TOKENTAB_LIVE=1`. It does **not** make Token Tab phone home: it shells
+out to the official `claude` CLI (`claude -p "/usage"`), which does the keychain read and
+the network call, and Token Tab only parses the printed summary (zero token cost,
+`num_turns: 0`). The spawn lives in `adapters/claude-live.mjs`, **outside** the audited
+`src/` core, so the two-minute audit of `src/` still finds no network and no subprocess
+(`grep -RnE "child_process|spawn|execFile" src/` prints nothing) even with live enabled.
+
+- The trust boundary shifts honestly: Token Tab still opens no socket and reads no
+  keychain itself; it delegates to the `claude` CLI you already run and trust. That is a
+  weaker claim than the default build's "cannot phone home," which is exactly why it is
+  off by default and isolated to one fenced file.
+- **Fails closed.** If `claude` can't be resolved, times out, or the output format
+  changes, it silently falls back to the local estimate and shows a gray
+  `live unavailable` line (set `TOKENTAB_LIVE_DEBUG=1` for the reason).
+- **CLI/SwiftBar only.** An App-Sandboxed native app cannot spawn `claude`, so this
+  feature targets the CLI and SwiftBar form factor; the default build and the future
+  native app stay pure-local.
+- **On the menu bar:** install `swiftbar/token-tab-live.2m.sh` (refreshes every 2 minutes,
+  sets `TOKENTAB_LIVE=1`, resolves `claude`). The default `token-tab.30s.sh` is unchanged
+  and never spawns anything — `/usage` should not be polled every 30s.
+
+The **local** 5-hour window (above) stays the default everywhere and needs no opt-in.
 
 ## Limitations / roadmap
 

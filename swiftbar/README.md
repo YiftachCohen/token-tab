@@ -18,6 +18,20 @@ Access** to read `~/.claude`, which is a broader grant than the native app asks 
 3. Make sure it's executable: `chmod +x swiftbar/token-tab.30s.sh`
 4. SwiftBar → **Refresh all**. You should see `◧ <today's tokens>` in the menu bar.
 
+## Live server % (opt-in)
+
+Want the authoritative session/weekly `%` (what `claude /usage` shows), not just the
+local estimate? Install the live plugin instead of (or alongside) the default:
+```sh
+ln -s "$(pwd)/swiftbar/token-tab-live.2m.sh" \
+  ~/Library/Application\ Support/SwiftBar/token-tab-live.2m.sh
+```
+It refreshes every 2 minutes (not 30s — `/usage` shouldn't be polled that often), sets
+`TOKENTAB_LIVE=1`, and resolves the `claude` binary. It shells out to the official
+`claude` CLI (which does the network/keychain); Token Tab only parses the output and
+falls back to the local estimate on any failure. See "The live server %" in the root
+README. If `claude` isn't auto-found, set `TOKENTAB_CLAUDE_BIN` to its absolute path.
+
 ## Requirements
 - `node` (≥18) or `bun` on disk. The wrapper looks in Homebrew/system paths because
   SwiftBar runs with a minimal `PATH`.
