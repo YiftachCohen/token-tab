@@ -1,0 +1,20 @@
+{
+  "name": "token-tab",
+  "version": "0.0.1",
+  "description": "A provably-safe AI usage meter for the macOS menu bar. Reads local Claude Code logs, makes no network calls, keeps none of your content.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "token-tab": "src/token-tab.mjs"
+  },
+  "scripts": {
+    "start": "node src/token-tab.mjs",
+    "swiftbar": "node src/token-tab.mjs --swiftbar",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "keywords": ["claude", "claude-code", "tokens", "usage", "menubar", "macos", "ccusage"]
+}

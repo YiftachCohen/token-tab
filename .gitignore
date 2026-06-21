@@ -1,0 +1,35 @@
+# Dependencies (Token Tab has none today; here for hygiene)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs / temp
+*.log
+tmp/
+.tmp/
+
+# Swift / Xcode (for the future native MenuBarExtra app)
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Conductor workspace scratch (also excluded locally via .git/info/exclude)
+.context/
