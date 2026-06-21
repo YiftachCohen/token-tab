@@ -111,6 +111,53 @@ test("recordFromLine filters to assistant turns with usage", () => {
   assert.equal(r.content, undefined, "content is never carried out of the parser");
 });
 
+test("usage window: active block; reset exact; no guessed % without a configured cap", () => {
+  const now = new Date("2026-06-20T18:00:00Z");
+  const records = [
+    rec({ messageId: "y", requestId: "yr", timestamp: "2026-06-19T10:00:00Z", usage: u(1000, 0, 0, 0) }), // completed block
+    rec({ messageId: "a1", requestId: "ar1", timestamp: "2026-06-20T16:30:00Z", usage: u(200, 0, 0, 0) }),
+    rec({ messageId: "a2", requestId: "ar2", timestamp: "2026-06-20T17:00:00Z", usage: u(100, 0, 0, 0) }),
+  ];
+  const a = aggregate(records, { now });
+  assert.equal(a.window.active, true);
+  assert.equal(a.window.tokens, 300, "active block tokens");
+  assert.equal(a.window.calibratedCap, 1000, "busiest completed block is exposed (info only)");
+  assert.equal(a.window.capSource, "none");
+  assert.equal(a.window.pct, null, "calibrated cap is NOT used as a denominator — would over-report");
+  // reset anchors to the EXACT first message of the block (16:30Z), not the top of the hour.
+  assert.equal(a.window.resetAt, new Date("2026-06-20T21:30:00Z").getTime());
+  assert.equal(a.window.msToReset, 3.5 * 60 * 60 * 1000, "21:30 - 18:00 = 3h30m");
+});
+
+test("usage window: explicit cap overrides calibration", () => {
+  const now = new Date("2026-06-20T18:00:00Z");
+  const records = [
+    rec({ messageId: "y", requestId: "yr", timestamp: "2026-06-19T10:00:00Z", usage: u(1000, 0, 0, 0) }),
+    rec({ messageId: "a1", requestId: "ar1", timestamp: "2026-06-20T16:30:00Z", usage: u(200, 0, 0, 0) }),
+    rec({ messageId: "a2", requestId: "ar2", timestamp: "2026-06-20T17:00:00Z", usage: u(100, 0, 0, 0) }),
+  ];
+  const a = aggregate(records, { now, cap: 600 });
+  assert.equal(a.window.capSource, "config");
+  assert.equal(a.window.pct, 50, "300 / 600");
+});
+
+test("usage window: idle when last activity is older than the block", () => {
+  const now = new Date("2026-06-20T18:00:00Z");
+  const a = aggregate([rec({ messageId: "y", requestId: "yr", timestamp: "2026-06-19T10:00:00Z", usage: u(1000, 0, 0, 0) })], { now });
+  assert.equal(a.window.active, false);
+  assert.equal(a.window.tokens, 0);
+  assert.equal(a.window.msToReset, null);
+});
+
+test("usage window: no cap basis -> pct is null, not a fake number", () => {
+  const now = new Date("2026-06-20T18:00:00Z");
+  const a = aggregate([rec({ messageId: "s", requestId: "sr", timestamp: "2026-06-20T17:30:00Z", usage: u(50, 0, 0, 0) })], { now });
+  assert.equal(a.window.active, true);
+  assert.equal(a.window.tokens, 50);
+  assert.equal(a.window.capSource, "none");
+  assert.equal(a.window.pct, null, "never invent a % without a cap basis");
+});
+
 test("rolling-5h window is absolute half-open (now-5h, now] — TZ independent", () => {
   const now = new Date("2026-06-20T18:00:00Z");
   const within = rec({ messageId: "a", requestId: "1", timestamp: "2026-06-20T15:00:00Z" }); // 3h ago

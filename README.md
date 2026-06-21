@@ -1,9 +1,9 @@
 # Token Tab
 
-Token Tab shows your Claude Code token usage in the macOS menu bar: tokens now, with
-dollars and rate-limit runway to come. It reads the session logs Claude Code already
-writes on disk, so it needs no API keys, no keychain access, and no AWS credentials,
-and it makes no network calls.
+Token Tab shows your Claude Code token usage in the macOS menu bar, with your current
+5-hour rate-limit window (exact reset countdown) a click away in the dropdown. It reads
+the session logs Claude Code already writes on disk, so it needs no API keys, no
+keychain access, and no AWS credentials, and it makes no network calls.
 
 It reads only the usage numbers. Your prompts and code never leave your machine,
 because the app has no way to send them anywhere.
@@ -88,12 +88,34 @@ Validated against [`ccusage`](https://github.com/ryoppippi/ccusage) on real logs
 
 - `TOKENTAB_LOG_DIR`: point at a non-default log directory.
 - `CLAUDE_CONFIG_DIR`: respected (reads `$CLAUDE_CONFIG_DIR/projects`).
-- Default: `~/.claude/projects`.
+- `TOKENTAB_WINDOW_CAP`: token cap for the 5h-window `%` (see below). If unset, it's
+  estimated from your busiest past window.
+- Default log dir: `~/.claude/projects`.
+
+## The usage window (subscription)
+
+The menu-bar headline is your token count (today). On a Claude subscription, the
+dropdown also shows your **current 5-hour rate-limit window**, computed entirely from
+local logs. Anthropic resets usage in fixed 5-hour blocks anchored to your first message
+of the block.
+
+- **The reset countdown is exact** ("Resets in 3h36m"). Verified against Claude's own
+  `/usage`: the window starts at your first message (not the top of the hour) and resets
+  5 hours later.
+- **A `%` shows only when you set `TOKENTAB_WINDOW_CAP`.** Anthropic doesn't publish the
+  per-plan cap, and Token Tab will not invent one: a guessed `%` that disagrees with
+  Claude is worse than none. To get an accurate `%`, open Claude's `/usage`, note "N%
+  used", and set the cap to `current-window-tokens / (N/100)`. For example, 20M at 5% ⇒
+  `TOKENTAB_WINDOW_CAP=400000000`.
+
+The **live** server-`%` (what Claude's `/usage` and CodexBar show) needs an
+authenticated network call, so it is intentionally **not** in the default build. It's a
+planned **opt-in** that would phone home; the default stays provably local.
 
 ## Limitations / roadmap
 
-- **Tokens first.** Dollars (an estimate from a bundled price table) and subscription
-  **runway** ("~60% of your 5h window," experimental) are the next layers.
+- **Dollars next.** A per-model price-table estimate is the next layer (Bedrock gets its
+  own rates).
 - **Claude-only** today. A Codex surface (`~/.codex`) is a natural add.
 - **Native app** is the keeper: SwiftUI `MenuBarExtra`, App Sandbox, no network
   entitlement, scoped read of `~/.claude/projects`, signed + notarized. The full design

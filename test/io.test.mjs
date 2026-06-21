@@ -73,11 +73,16 @@ test("missing log dir: graceful message, exit 0 (never crashes the menu bar)", a
   assert.match(out, /No logs found/);
 });
 
-test("--swiftbar: headline line is the token glyph", async () => {
-  const dir = makeFixtureDir();
+test("--swiftbar: subscription headline is the usage window; tokens stay in the dropdown", async () => {
+  const dir = makeFixtureDir(); // fixture is subscription-dominant (claude-opus-4-8)
   try {
     const out = await cli(["--swiftbar"], dir);
-    assert.match(out.split("\n")[0], /^◧ /, "first line is the menu-bar headline");
+    // Headline is a menu-bar glyph: ◔ (active window / %) or ◧ (token fallback when idle).
+    // Fixture dates are fixed, so whether the window is "active" depends on wall-clock;
+    // the deterministic window behavior is pinned in core.test.mjs with an injected now.
+    assert.match(out.split("\n")[0], /^[◔◧] /, "first line is the menu-bar headline");
+    assert.match(out, /5h window:/, "window detail shown in the dropdown");
+    assert.match(out, /Today: .* tokens/, "tokens still visible in the dropdown");
     assert.match(out, /Local only · No network/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

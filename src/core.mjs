@@ -65,6 +65,7 @@ function startOfLocalWeek(now, weekStartsOn /* 0=Sun,1=Mon */) {
   return d;
 }
 
+
 /**
  * Aggregate a stream of assistant usage records.
  *
@@ -114,6 +115,7 @@ export function aggregate(records, opts = {}) {
   let counted = 0;
   let untrackedTokens = 0;
   let untrackedRequests = 0;
+  const stamps = []; // {t, sum} for the window pass (past-dated only)
 
   for (const r of kept.values()) {
     const sum = usageSum(r.usage);
@@ -144,9 +146,49 @@ export function aggregate(records, opts = {}) {
         if (localDayKey(ts) === todayKey) today += sum;
         if (tms >= weekStart) thisWeek += sum;
         if (tms > rollingCutoff) rolling5h += sum;
+        stamps.push({ t: tms, sum });
       }
     }
   }
+
+  // Pass 3 — current usage window (Anthropic-style fixed 5h reset blocks).
+  // A block starts at the EXACT first message (verified: Claude anchors the window to
+  // your first message, not the top of the hour) and lasts blockHours; a gap >
+  // blockHours, or crossing the block end, starts a new block. The reset time is exact.
+  // The % needs the plan cap, which Anthropic does not publish — so pct is only given
+  // when opts.cap is supplied. calibratedCap (busiest completed block) is exposed as
+  // info but is NOT used as a denominator: you've usually never maxed a window, so it
+  // would over-report how close you are. Set the cap from Claude's /usage to get a %.
+  const blockMs = (opts.blockHours ?? 5) * 60 * 60 * 1000;
+  stamps.sort((a, b) => a.t - b.t);
+  const blocks = [];
+  for (const s of stamps) {
+    const last = blocks[blocks.length - 1];
+    if (last && s.t - last.lastT <= blockMs && s.t < last.start + blockMs) {
+      last.tokens += s.sum;
+      last.lastT = s.t;
+    } else {
+      blocks.push({ start: s.t, lastT: s.t, tokens: s.sum });
+    }
+  }
+  const nowMs = now.getTime();
+  const lastBlock = blocks[blocks.length - 1] || null;
+  const windowActive = !!(lastBlock && nowMs >= lastBlock.start && nowMs < lastBlock.start + blockMs);
+  const completed = windowActive ? blocks.slice(0, -1) : blocks;
+  const calibratedCap = completed.reduce((m, b) => Math.max(m, b.tokens), 0);
+  const cap = opts.cap != null && opts.cap > 0 ? opts.cap : 0;
+  const windowTokens = windowActive ? lastBlock.tokens : 0;
+  const resetAt = windowActive ? lastBlock.start + blockMs : null;
+  const windowStats = {
+    active: windowActive,
+    tokens: windowTokens,
+    resetAt, // ms epoch, or null when no active block
+    msToReset: resetAt != null ? resetAt - nowMs : null,
+    cap, // 0 when no configured cap
+    calibratedCap, // busiest completed block — informational only
+    capSource: cap > 0 ? "config" : "none",
+    pct: cap > 0 ? Math.round((windowTokens / cap) * 100) : null,
+  };
 
   return {
     total,
@@ -156,6 +198,7 @@ export function aggregate(records, opts = {}) {
     today,
     thisWeek,
     rolling5h,
+    window: windowStats,
     dedup: { counted, duplicatesDropped, collisionsDifferingTotals },
     approximate,
     untracked: { tokens: untrackedTokens, requests: untrackedRequests },

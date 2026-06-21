@@ -93,6 +93,13 @@ function abbrev(n) {
   return (n / 1e9).toFixed(2) + "B";
 }
 
+function fmtDur(ms) {
+  if (ms == null || ms < 0) return "—";
+  const mins = Math.round(ms / 60000);
+  const h = Math.floor(mins / 60);
+  return h > 0 ? `${h}h${String(mins % 60).padStart(2, "0")}m` : `${mins}m`;
+}
+
 function dominantSurface(bySurface) {
   let best = null,
     bestN = -1;
@@ -128,16 +135,29 @@ async function main() {
 
   const files = findJsonl(dir);
   const { records, parseErrors } = await readRecords(files);
-  const agg = aggregate(records);
+  const cap = Number(process.env.TOKENTAB_WINDOW_CAP);
+  const agg = aggregate(records, { cap: Number.isFinite(cap) && cap > 0 ? cap : undefined });
 
   if (mode === "json") {
     console.log(JSON.stringify({ ...agg, files: files.length, parseErrors: parseErrors.length }, null, 2));
     return;
   }
 
+  const surface = dominantSurface(agg.bySurface);
+  const w = agg.window;
+
   if (mode === "swiftbar") {
-    console.log(`◧ ${abbrev(agg.today)}`); // headline: tokens used today
+    // Local default: the headline is tokens (today). The 5h window — exact reset
+    // countdown, plus a % only if you've set a cap — lives in the dropdown. All local,
+    // no network. (A live server-% is a future opt-in that would phone home.)
+    console.log(`◧ ${abbrev(agg.today)}`);
     console.log("---");
+    if (surface === "subscription") {
+      console.log(`5h window: ${w.tokens.toLocaleString()} tokens${w.pct != null ? ` · ${w.pct}%` : ""}`);
+      console.log(`${w.active ? `Resets in ${fmtDur(w.msToReset)}` : "Window idle"}${w.pct != null ? " · cap from config" : ""} | color=gray`);
+      if (w.pct == null) console.log("For a %, set TOKENTAB_WINDOW_CAP to your plan cap (from Claude /usage) | color=gray");
+      console.log("---");
+    }
     console.log(`Today: ${agg.today.toLocaleString()} tokens`);
     console.log(`This week: ${agg.thisWeek.toLocaleString()}`);
     console.log(`Last 5h: ${agg.rolling5h.toLocaleString()}`);
@@ -157,7 +177,12 @@ async function main() {
   line(`  Last 5h:   ${abbrev(agg.rolling5h).padStart(8)}   (${agg.rolling5h.toLocaleString()})`);
   line(`  All time:  ${abbrev(agg.total).padStart(8)}   (${agg.total.toLocaleString()})`);
   line("");
-  line(`  Surface: ${dominantSurface(agg.bySurface)} (dominant)`);
+  line(
+    `  5h window: ${abbrev(w.tokens).padStart(8)}   ${w.pct != null ? `${w.pct}% of cap (${w.capSource})` : "set TOKENTAB_WINDOW_CAP for %"}` +
+      `   ${w.active ? "resets in " + fmtDur(w.msToReset) : "(idle)"}`,
+  );
+  line("");
+  line(`  Surface: ${surface} (dominant)`);
   for (const [s, n] of Object.entries(agg.bySurface).sort((a, b) => b[1] - a[1]))
     line(`    ${s.padEnd(13)} ${abbrev(n).padStart(8)}`);
   line("");
