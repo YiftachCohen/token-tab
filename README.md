@@ -88,8 +88,12 @@ Validated against [`ccusage`](https://github.com/ryoppippi/ccusage) on real logs
 
 - `TOKENTAB_LOG_DIR`: point at a non-default log directory.
 - `CLAUDE_CONFIG_DIR`: respected (reads `$CLAUDE_CONFIG_DIR/projects`).
-- `TOKENTAB_WINDOW_CAP`: token cap for the 5h-window `%` (see below). If unset, it's
-  estimated from your busiest past window.
+- `TOKENTAB_WINDOW_CAP`: your plan's 5h token cap, to show a window `%`. If unset, only
+  the exact reset countdown shows (no guessed `%`). Derive it from Claude's `/usage`
+  (see below).
+- Set any of these as env vars, **or** in a local `KEY=VALUE` file kept out of the repo:
+  `~/.config/token-tab/env` (or `~/.token-tab.env`). Only `TOKENTAB_*` keys are read;
+  real env vars take precedence. This is where your cap lives so it never gets committed.
 - Default log dir: `~/.claude/projects`.
 
 ## The usage window (subscription)

@@ -13,7 +13,7 @@
 //
 // Log dir resolution: $TOKENTAB_LOG_DIR  >  $CLAUDE_CONFIG_DIR/projects  >  ~/.claude/projects
 
-import { createReadStream, readdirSync, statSync, existsSync } from "node:fs";
+import { createReadStream, readdirSync, statSync, existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -23,6 +23,29 @@ function resolveLogDir() {
   if (process.env.TOKENTAB_LOG_DIR) return process.env.TOKENTAB_LOG_DIR;
   if (process.env.CLAUDE_CONFIG_DIR) return join(process.env.CLAUDE_CONFIG_DIR, "projects");
   return join(homedir(), ".claude", "projects");
+}
+
+// Load machine-local settings (e.g. TOKENTAB_WINDOW_CAP) from a KEY=VALUE file kept
+// OUTSIDE the repo, so your plan cap never gets committed. Real env vars win. Only
+// TOKENTAB_* keys are honored. This only reads a local file — no network, no secrets.
+function loadLocalConfig() {
+  const candidates = [
+    process.env.TOKENTAB_CONFIG,
+    join(homedir(), ".config", "token-tab", "env"),
+    join(homedir(), ".token-tab.env"),
+  ].filter(Boolean);
+  for (const path of candidates) {
+    let txt;
+    try {
+      txt = readFileSync(path, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of txt.split("\n")) {
+      const m = line.match(/^\s*(TOKENTAB_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    }
+  }
 }
 
 function findJsonl(dir) {
@@ -113,6 +136,7 @@ function dominantSurface(bySurface) {
 }
 
 async function main() {
+  loadLocalConfig();
   const mode = process.argv.includes("--json")
     ? "json"
     : process.argv.includes("--swiftbar")

@@ -88,3 +88,19 @@ test("--swiftbar: subscription headline is the usage window; tokens stay in the 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("window cap from a local config file (TOKENTAB_CONFIG) -> dropdown shows a %", async () => {
+  const dir = makeFixtureDir();
+  const cfg = join(tmpdir(), `tt-cfg-${process.pid}-${Math.floor(performance.now())}.env`);
+  writeFileSync(cfg, "TOKENTAB_WINDOW_CAP=1000\n");
+  try {
+    const env = { ...process.env, TOKENTAB_LOG_DIR: dir, TOKENTAB_CONFIG: cfg };
+    delete env.TOKENTAB_WINDOW_CAP; // prove the value comes from the file, not the env
+    const { stdout } = await run("node", [CLI, "--swiftbar"], { env });
+    assert.match(stdout, /5h window:.*%/, "a % appears once a cap is configured via file");
+    assert.match(stdout, /cap from config/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cfg, { force: true });
+  }
+});
