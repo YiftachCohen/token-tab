@@ -43,8 +43,7 @@ export function normalizeModel(model) {
 export function classifySurface(model) {
   const { base } = normalizeModel(model);
   if (!base || base === "<synthetic>" || base === "<unknown>") return "untracked";
-  if (base.startsWith("us.anthropic.") || /^anthropic\..*:\d+$/.test(base) || base.startsWith("anthropic."))
-    return "bedrock";
+  if (base.startsWith("us.anthropic.") || base.startsWith("anthropic.")) return "bedrock";
   if (base.startsWith("claude-") || /^(sonnet|opus|haiku)$/i.test(base)) return "subscription";
   return "untracked";
 }
@@ -137,9 +136,15 @@ export function aggregate(records, opts = {}) {
 
     const ts = new Date(r.timestamp);
     if (!isNaN(ts)) {
-      if (localDayKey(ts) === todayKey) today += sum;
-      if (ts.getTime() >= weekStart) thisWeek += sum;
-      if (ts.getTime() > rollingCutoff) rolling5h += sum;
+      // Upper-bound every window at `now` so a future-dated line (clock skew)
+      // can't inflate today/week/5h. Total still includes it — it's real spend,
+      // just mis-stamped. Makes rolling5h the documented half-open (now-5h, now].
+      const tms = ts.getTime();
+      if (tms <= now.getTime()) {
+        if (localDayKey(ts) === todayKey) today += sum;
+        if (tms >= weekStart) thisWeek += sum;
+        if (tms > rollingCutoff) rolling5h += sum;
+      }
     }
   }
 

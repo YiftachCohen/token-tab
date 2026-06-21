@@ -42,8 +42,17 @@ function findJsonl(dir) {
   };
   walk(dir);
   // Deterministic order so first-seen dedup is reproducible: oldest mtime first.
+  // Tolerate a file vanishing between the walk and the stat — Claude Code rotates
+  // logs under us, and a hard crash here would just blank the menu bar.
   return out
-    .map((p) => ({ p, mtime: statSync(p).mtimeMs }))
+    .map((p) => {
+      try {
+        return { p, mtime: statSync(p).mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
     .sort((a, b) => a.mtime - b.mtime || (a.p < b.p ? -1 : 1))
     .map((x) => x.p);
 }
@@ -53,19 +62,25 @@ async function readRecords(files) {
   const parseErrors = []; // {path, line} only — never the content of the bad line
   for (const path of files) {
     let lineNo = 0;
-    const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
-    for await (const line of rl) {
-      lineNo++;
-      if (!line.trim()) continue;
-      let obj;
-      try {
-        obj = JSON.parse(line);
-      } catch {
-        parseErrors.push({ path, line: lineNo }); // tolerate malformed (live-write) lines
-        continue;
+    try {
+      const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
+      for await (const line of rl) {
+        lineNo++;
+        if (!line.trim()) continue;
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch {
+          parseErrors.push({ path, line: lineNo }); // tolerate malformed (live-write) lines
+          continue;
+        }
+        const rec = recordFromLine(obj);
+        if (rec) records.push(rec);
       }
-      const rec = recordFromLine(obj);
-      if (rec) records.push(rec);
+    } catch {
+      // File vanished or became unreadable mid-read — skip the rest of it and
+      // keep going so one rotated log doesn't abort the whole report.
+      parseErrors.push({ path, line: lineNo });
     }
   }
   return { records, parseErrors };
@@ -157,7 +172,7 @@ async function main() {
   line(`    files:                 ${files.length}`);
   line(`    usage records counted: ${agg.dedup.counted.toLocaleString()}`);
   line(`    duplicates dropped:    ${agg.dedup.duplicatesDropped.toLocaleString()}`);
-  line(`    key collisions w/ DIFFERING totals: ${agg.dedup.collisionsDifferingTotals}  <- the dedup-rule risk`);
+  line(`    keep-last revisions (normal for streaming): ${agg.dedup.collisionsDifferingTotals}`);
   line(`    approximate (missing id): ${agg.approximate}`);
   line(`    untracked: ${agg.untracked.requests} requests / ${abbrev(agg.untracked.tokens)} tokens`);
   line(`    malformed lines skipped: ${parseErrors.length}`);
