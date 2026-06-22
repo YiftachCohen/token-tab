@@ -70,12 +70,16 @@ function startOfLocalWeek(now, weekStartsOn /* 0=Sun,1=Mon */) {
  * Aggregate a stream of assistant usage records.
  *
  * @param {Iterable<{messageId?:string,requestId?:string,model:string,usage:object,timestamp:string,isSidechain?:boolean}>} records
- * @param {{now?:Date, weekStartsOn?:number}} opts
+ * @param {{now?:Date, weekStartsOn?:number, cost?:(usage:object,model:string)=>{usd:number,priced:boolean}}} opts
+ *   opts.cost (optional): a pure pricing function (see src/pricing.mjs). When supplied,
+ *   the result carries a `cost` block (dollars per window + per model). Omit it and the
+ *   output is byte-for-byte unchanged — the dollars layer never alters the token numbers.
  * @returns aggregate snapshot (plain value object — no content, no PII)
  */
 export function aggregate(records, opts = {}) {
   const now = opts.now ? new Date(opts.now) : new Date();
   const weekStartsOn = opts.weekStartsOn ?? 1; // Monday
+  const costFn = typeof opts.cost === "function" ? opts.cost : null;
   const todayKey = localDayKey(now);
   const weekStart = startOfLocalWeek(now, weekStartsOn).getTime();
   const rollingCutoff = now.getTime() - FIVE_HOURS_MS;
@@ -115,6 +119,17 @@ export function aggregate(records, opts = {}) {
   let counted = 0;
   let untrackedTokens = 0;
   let untrackedRequests = 0;
+  // Dollars (only when a pricing fn is injected). Mirrors the token windows so the
+  // estimate can be shown per today/week/5h. "unpriced" = a model with no rate in the
+  // table: its tokens still count everywhere else, just not toward dollars.
+  let costTotal = 0;
+  let costToday = 0;
+  let costWeek = 0;
+  let costRolling = 0;
+  const costByModel = {};
+  let unpricedTokens = 0;
+  let unpricedRequests = 0;
+  const unpricedModels = new Set();
   const stamps = []; // {t, sum} for the window pass (past-dated only)
 
   for (const r of kept.values()) {
@@ -136,6 +151,22 @@ export function aggregate(records, opts = {}) {
       untrackedRequests++;
     }
 
+    let usd = 0;
+    let priced = false;
+    if (costFn) {
+      const c2 = costFn(r.usage, r.model);
+      usd = c2.usd || 0;
+      priced = !!c2.priced;
+      if (priced) {
+        costTotal += usd;
+        costByModel[base] = (costByModel[base] || 0) + usd;
+      } else {
+        unpricedTokens += sum;
+        unpricedRequests++;
+        unpricedModels.add(base);
+      }
+    }
+
     const ts = new Date(r.timestamp);
     if (!isNaN(ts)) {
       // Upper-bound every window at `now` so a future-dated line (clock skew)
@@ -146,6 +177,11 @@ export function aggregate(records, opts = {}) {
         if (localDayKey(ts) === todayKey) today += sum;
         if (tms >= weekStart) thisWeek += sum;
         if (tms > rollingCutoff) rolling5h += sum;
+        if (priced) {
+          if (localDayKey(ts) === todayKey) costToday += usd;
+          if (tms >= weekStart) costWeek += usd;
+          if (tms > rollingCutoff) costRolling += usd;
+        }
         stamps.push({ t: tms, sum });
       }
     }
@@ -202,6 +238,22 @@ export function aggregate(records, opts = {}) {
     dedup: { counted, duplicatesDropped, collisionsDifferingTotals },
     approximate,
     untracked: { tokens: untrackedTokens, requests: untrackedRequests },
+    // Present only when opts.cost was supplied. Dollars are an estimate; `unpriced`
+    // records the tokens we counted but had no rate for (honest gap, never guessed).
+    cost: costFn
+      ? {
+          total: costTotal,
+          today: costToday,
+          thisWeek: costWeek,
+          rolling5h: costRolling,
+          byModel: costByModel,
+          unpriced: {
+            tokens: unpricedTokens,
+            requests: unpricedRequests,
+            models: [...unpricedModels].sort(),
+          },
+        }
+      : undefined,
   };
 }
 

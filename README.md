@@ -1,5 +1,7 @@
 # Token Tab
 
+[![CI](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml/badge.svg)](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml)
+
 Token Tab shows your Claude Code token usage in the macOS menu bar, with your current
 5-hour rate-limit window (exact reset countdown) a click away in the dropdown. It reads
 the session logs Claude Code already writes on disk, so it needs no API keys, no
@@ -16,6 +18,8 @@ because the app has no way to send them anywhere.
 - Reads `~/.claude/projects/**/*.jsonl` (the transcripts Claude Code already writes).
 - Counts tokens per model, per surface (subscription / Bedrock), and per time window
   (today / this week / last 5h).
+- Estimates **dollars** from a bundled per-model price table (today / this week / all
+  time, broken down by model). A local estimate, not an invoice — see "Cost" below.
 - Works the same whether Claude Code talks to the Anthropic API, a subscription
   (Max/Pro), or **AWS Bedrock**. The token counts are in the local logs either way,
   so no AWS credentials are needed to read them.
@@ -59,8 +63,9 @@ grep -RnE "\.content" src/ | grep -v "//"
 #    It returns message.id, model, usage, timestamp, isSidechain. Never content.
 
 # 5. Read the whole thing. The audited core (core.mjs + token-tab.mjs +
-#    live-parse.mjs) is pure parsing and rendering. The ONLY subprocess in the
-#    repo is adapters/claude-live.mjs (the opt-in live path), audited separately:
+#    live-parse.mjs + pricing.mjs) is pure parsing, pricing math, and rendering.
+#    pricing.mjs is a static rate table + arithmetic — no network, no I/O. The ONLY
+#    subprocess in the repo is adapters/claude-live.mjs (the opt-in live path):
 grep -RnE "child_process|spawn|execFile" adapters/   # -> only adapters/claude-live.mjs
 ```
 
@@ -91,6 +96,33 @@ Validated against [`ccusage`](https://github.com/ryoppippi/ccusage) on real logs
 - Streaming emits several usage lines per message that share an id; `output_tokens`
   grows across them, so the parser keeps the **last** (final, complete) line. This is
   the one dedup rule that affects the total, and it's pinned by a test.
+
+## Cost (dollars)
+
+The report and dropdown show a dollar **estimate** alongside the token counts: today,
+this week, all time, and a per-model breakdown. It's computed locally and on by default
+(no network, no key — it's just arithmetic on a bundled rate table). Honest scope:
+
+- **It's an estimate, not your bill.** Good enough to know your tab; not reconciled
+  accounting. Bedrock region surcharges and cache-TTL nuances aren't modeled.
+- **The price table is `src/pricing.mjs`** — Anthropic's published USD-per-million list
+  rates, right there to audit and edit. The two cache classes are derived from the input
+  rate by Anthropic's published multipliers: cache **write** = 1.25× input (the 5-minute
+  rate; logs don't record the TTL), cache **read** = 0.10× input. All four token classes
+  are priced separately — cache-read dominates volume but is the cheapest class.
+- **`[1m]` and Bedrock ids** normalize to their base model: the 1M-context tier is
+  standard-priced on current models (no long-context premium), and `us.anthropic.<id>`
+  reuses the same list rate.
+- **Unknown model ⇒ tokens tracked, price not invented.** A model with no entry in the
+  table still counts toward every token total; it just lands in an `unpriced` line
+  (requests / tokens / model ids) instead of getting a guessed dollar figure. A wrong
+  number is worse than an honest "no rate for this."
+
+Validated against `ccusage` on real logs: **token counts reconcile** (per-model within
+~0.03%). The **dollar totals differ by design** — `ccusage` prices off LiteLLM's
+community table, Token Tab off Anthropic's list rates — so compare Claude-only subtotals
+and expect the dollars to diverge (notably on cache-heavy, Opus-tier usage). Token Tab's
+rates are visible and editable in one short file; that's the trade.
 
 ## Configuration
 
@@ -154,8 +186,8 @@ The **local** 5-hour window (above) stays the default everywhere and needs no op
 
 ## Limitations / roadmap
 
-- **Dollars next.** A per-model price-table estimate is the next layer (Bedrock gets its
-  own rates).
+- **Dollars shipped** as a local estimate (see "Cost" above). Refinements still open:
+  per-region Bedrock rates and a 1-hour cache-write tier.
 - **Claude-only** today. A Codex surface (`~/.codex`) is a natural add.
 - **Native app** is the keeper: SwiftUI `MenuBarExtra`, App Sandbox, no network
   entitlement, scoped read of `~/.claude/projects`, signed + notarized. The full design
@@ -168,5 +200,6 @@ npm test     # node --test, golden-fixture suite for the parser core
 ```
 
 Architecture: `src/core.mjs` is a pure, I/O-free parser (so tests pin every edge case
-without a filesystem); `src/token-tab.mjs` is the thin I/O shell that reads files and
-renders. License: MIT.
+without a filesystem); `src/pricing.mjs` is the pure price table + cost math, injected
+into the parser so the rates stay decoupled and testable; `src/token-tab.mjs` is the thin
+I/O shell that reads files and renders. License: MIT.
