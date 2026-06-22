@@ -22,9 +22,12 @@ Icon
 tmp/
 .tmp/
 
-# Swift / Xcode (for the future native MenuBarExtra app)
+# Swift / Xcode (native MenuBarExtra app under app/)
 .build/
 .swiftpm/
+# Assembled app bundle (produced by app/Scripts/build-app.sh)
+app/Token Tab.app/
+app/Bundle/AppIcon.icns
 DerivedData/
 xcuserdata/
 *.xcuserstate
