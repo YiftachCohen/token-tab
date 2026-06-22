@@ -1,5 +1,13 @@
 # Token Tab
 
+<p align="center">
+  <img src="app/Branding/gauge-appicon.png" alt="Token Tab" width="116" height="116"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/Branding/gauge-wordmark-dark.png">
+    <img src="app/Branding/gauge-wordmark.png" alt="Token Tab" width="172">
+  </picture>
+</p>
+
 [![CI](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml/badge.svg)](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml)
 
 Token Tab shows your Claude Code token usage in the macOS menu bar, with your current
@@ -192,6 +200,49 @@ The **local** 5-hour window (above) stays the default everywhere and needs no op
 - **Native app** is the keeper: SwiftUI `MenuBarExtra`, App Sandbox, no network
   entitlement, scoped read of `~/.claude/projects`, signed + notarized. The full design
   and review live in the project design doc.
+
+## Branding
+
+The mark is the **gauge** — the usage meter itself. It's a progress ring that doubles as
+the app's own live indicator: the green arc *is* the runway. It reads from a 16px menu-bar
+glyph up to the app icon, and tints cleanly as a monochrome template.
+
+| Role | Hex | |
+|---|---|---|
+| Gauge green (progress / health) | `#36C98A` | the one signal worth spending color on |
+| Wordmark green | `#2E9E63` | the ring on a light background |
+| Tile gradient | `#26272E` → `#15161B` | the dark squircle (160°) |
+| Ring track | `#D8D5CF` | the unfilled arc |
+| Ink | `#1C1D22` | the wordmark text |
+
+**Assets** live in [`app/Branding/`](app/Branding). The SVGs are the source of truth; the
+rasters are generated from them.
+
+- **Vector** — `gauge-appicon.svg` (app icon), `favicon.svg` (full-bleed, for browser
+  tabs), `gauge-glyph.svg` (monochrome menu-bar glyph, uses `currentColor`),
+  `gauge-wordmark.svg` (ring + name lockup).
+- **Raster** — `gauge-appicon.png` (hero), `gauge-wordmark{,-dark}.png` (light/dark ink),
+  `favicon.ico` (16/32/48), `favicon-{16,32,48,192,512}.png`, `apple-touch-icon.png` (180).
+
+**Use the favicon** on a web page:
+
+```html
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.ico" sizes="any"><!-- legacy fallback -->
+```
+
+**Regenerate** (vector-drawn with Core Graphics — no external rasterizer):
+
+```sh
+app/Scripts/make-icon.sh       # → app/Bundle/AppIcon.icns (the macOS app icon)
+app/Scripts/make-branding.sh   # → the favicons, hero, and wordmarks above
+```
+
+The native app icon is wired in via `CFBundleIconFile`; `build-app.sh` regenerates the
+`.icns` on demand if it's missing. See [`app/README.md`](app/README.md#app-icon).
 
 ## Develop
 

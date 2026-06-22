@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Token Tab — favicon (V1 · Gauge), full-bleed for browser tabs.
+     Same mark as the app icon, without the macOS margin/shadow so the squircle fills
+     the tab. Scalable: modern browsers use this directly via <link rel="icon" type="image/svg+xml">. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="tile" x1="0.329" y1="0.030" x2="0.671" y2="0.970">
+      <stop offset="0" stop-color="#26272e"/>
+      <stop offset="1" stop-color="#15161b"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="118" ry="118" fill="url(#tile)"/>
+
+  <!-- gauge: background ring + ~70% progress arc -->
+  <circle cx="256" cy="256" r="95" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="31.6"/>
+  <circle cx="256" cy="256" r="95" fill="none" stroke="#36c98a" stroke-width="31.6"
+          stroke-linecap="round" stroke-dasharray="596.9" stroke-dashoffset="179.5"
+          transform="rotate(-90 256 256)"/>
+</svg>
