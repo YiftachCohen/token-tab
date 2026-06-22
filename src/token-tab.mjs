@@ -18,6 +18,7 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { aggregate, recordFromLine, classifySurface } from "./core.mjs";
+import { costOfUsage } from "./pricing.mjs";
 
 function resolveLogDir() {
   if (process.env.TOKENTAB_LOG_DIR) return process.env.TOKENTAB_LOG_DIR;
@@ -123,6 +124,15 @@ function fmtDur(ms) {
   return h > 0 ? `${h}h${String(mins % 60).padStart(2, "0")}m` : `${mins}m`;
 }
 
+// Dollars: cents under $1k, whole dollars above (a tab, not an invoice). A nonzero
+// amount that rounds below a cent shows "<$0.01" so tiny spend never reads as free.
+function fmtUsd(n) {
+  if (!n || n < 0) return "$0.00";
+  if (n < 0.01) return "<$0.01";
+  if (n >= 1000) return "$" + Math.round(n).toLocaleString();
+  return "$" + n.toFixed(2);
+}
+
 function dominantSurface(bySurface) {
   let best = null,
     bestN = -1;
@@ -166,7 +176,12 @@ async function main() {
   const files = findJsonl(dir);
   const { records, parseErrors } = await readRecords(files);
   const cap = Number(process.env.TOKENTAB_WINDOW_CAP);
-  const agg = aggregate(records, { cap: Number.isFinite(cap) && cap > 0 ? cap : undefined });
+  // Dollars are local-only arithmetic on a bundled price table — no network, no key —
+  // so the estimate is on by default (unlike the live server-%, which is opt-in).
+  const agg = aggregate(records, {
+    cap: Number.isFinite(cap) && cap > 0 ? cap : undefined,
+    cost: costOfUsage,
+  });
 
   // Opt-in live usage. Computed ONCE, before any render branch, and only when
   // enabled — the live adapter (the sole subprocess user, fenced under adapters/,
@@ -226,6 +241,13 @@ async function main() {
     console.log(`Today: ${agg.today.toLocaleString()} tokens`);
     console.log(`This week: ${agg.thisWeek.toLocaleString()}`);
     console.log(`Last 5h: ${agg.rolling5h.toLocaleString()}`);
+    if (agg.cost) {
+      console.log(
+        `Est. cost: ${fmtUsd(agg.cost.today)} today · ${fmtUsd(agg.cost.thisWeek)} week · ${fmtUsd(agg.cost.total)} all | color=gray`,
+      );
+      if (agg.cost.unpriced.tokens > 0)
+        console.log(`  (${abbrev(agg.cost.unpriced.tokens)} tokens unpriced) | color=gray`);
+    }
     console.log("---");
     for (const [s, n] of Object.entries(agg.bySurface)) console.log(`${s}: ${n.toLocaleString()}`);
     console.log("---");
@@ -256,6 +278,23 @@ async function main() {
     line("");
   } else if (liveEnabled) {
     line("  live unavailable — using local estimate (set TOKENTAB_LIVE_DEBUG=1 for the reason)");
+    line("");
+  }
+  if (agg.cost) {
+    line("  Cost estimate " + "─".repeat(38));
+    line(
+      `    today: ${fmtUsd(agg.cost.today).padStart(9)}   this week: ${fmtUsd(agg.cost.thisWeek).padStart(9)}   all time: ${fmtUsd(agg.cost.total).padStart(9)}`,
+    );
+    const priced = Object.entries(agg.cost.byModel).sort((a, b) => b[1] - a[1]);
+    if (priced.length) {
+      line("    by model:");
+      for (const [m, d] of priced.slice(0, 8)) line(`      ${m.padEnd(28)} ${fmtUsd(d).padStart(9)}`);
+    }
+    if (agg.cost.unpriced.tokens > 0)
+      line(
+        `    unpriced: ${agg.cost.unpriced.requests} requests / ${abbrev(agg.cost.unpriced.tokens)} tokens (no rate for: ${agg.cost.unpriced.models.join(", ")})`,
+      );
+    line("    estimate from a bundled price table — a tab, not an invoice.");
     line("");
   }
   line(`  Surface: ${surface} (dominant)`);
