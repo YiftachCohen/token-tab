@@ -44,13 +44,18 @@ final class UsageStore: ObservableObject {
     @Published var snapshot: Snapshot = .empty
     @Published var isRefreshing = false
     @Published var hasLoadedOnce = false
+    /// A coarse clock so time-derived UI (the menu-bar runway %) keeps ticking while idle,
+    /// without re-reading any files. The dropdown ticks faster (1s) only while it's open.
+    @Published var clock = Date()
 
     /// Persisted: which metric the Bedrock menu bar shows.
     @Published var menuMetric: MenuMetric {
         didSet { UserDefaults.standard.set(menuMetric.rawValue, forKey: "menuMetric") }
     }
 
-    private var timer: Timer?
+    private var watcher: FolderWatcher?
+    private var displayTimer: Timer?
+    private var lastRefresh = Date.distantPast
     private var logDirProvider: () -> URL?
 
     init(logDir: @escaping () -> URL?) {
@@ -60,13 +65,47 @@ final class UsageStore: ObservableObject {
     }
 
     func start() {
+        startDisplayTimer()
+        startWatcher()
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+    }
+
+    /// Call after the user grants folder access (logDir becomes available).
+    func accessChanged() {
+        startWatcher()
+        refresh()
+    }
+
+    func stop() {
+        displayTimer?.invalidate(); displayTimer = nil
+        watcher?.stop(); watcher = nil
+    }
+
+    /// File reads are event-driven: FSEvents fires only when ~/.claude actually changes,
+    /// so there's no idle polling. (If the stream can't start — e.g. under an unusual
+    /// sandbox — the 90s safety refresh below still keeps data fresh.)
+    private func startWatcher() {
+        guard watcher == nil, let dir = logDirProvider() else { return }
+        let w = FolderWatcher(path: dir.path) { [weak self] in
             Task { @MainActor in self?.refresh() }
+        }
+        w.start()
+        watcher = w
+    }
+
+    /// 30s clock tick: pure arithmetic (advances the runway display), with a low-frequency
+    /// safety refresh in case a file change was ever missed. No per-tick disk walk.
+    private func startDisplayTimer() {
+        guard displayTimer == nil else { return }
+        displayTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
         }
     }
 
-    func stop() { timer?.invalidate(); timer = nil }
+    private func tick() {
+        clock = Date()
+        if Date().timeIntervalSince(lastRefresh) > 90 { refresh() }
+    }
 
     func refresh() {
         guard let dir = logDirProvider() else { return }
@@ -87,6 +126,8 @@ final class UsageStore: ObservableObject {
                                          lastUpdated: Date(), cap: cap)
                 self.isRefreshing = false
                 self.hasLoadedOnce = true
+                self.lastRefresh = Date()
+                self.clock = Date()
             }
         }
     }

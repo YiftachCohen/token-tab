@@ -23,11 +23,12 @@ struct BurnPanel: View {
                 SectionLabel(text: "BURNED TODAY")
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(Fmt.usd(agg.cost?.today ?? 0))
-                        .font(Theme.figure(38, weight: .bold))
+                        .font(Theme.figure(40, weight: .bold))
+                        .tracking(Theme.tightTracking(40))
                         .foregroundStyle(Theme.ink)
                     Text("est.").font(.system(size: 13)).foregroundStyle(Theme.muted)
                 }
-                .padding(.top, 7)
+                .padding(.top, 6)
                 Text("\(Fmt.grouped(agg.today)) ")
                     .font(Theme.mono(14)) +
                 Text("tokens").font(Theme.mono(14)).foregroundColor(Theme.muted)
@@ -58,8 +59,8 @@ struct BurnPanel: View {
                         .foregroundStyle(Theme.amber)
                 }
             }
-            .padding(11)
-            .background(Theme.subtleFill, in: RoundedRectangle(cornerRadius: 10))
+            .padding(12)
+            .card()
             .padding(.horizontal, 17).padding(.top, 14)
 
             // Usage · main vs sub-agent
@@ -87,7 +88,7 @@ struct BurnPanel: View {
 
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 12)
             HStack(spacing: 6) {
-                Circle().fill(Theme.green).frame(width: 6, height: 6)
+                GlowDot(color: Theme.green)
                 Text("0 network calls · reads ~/.claude · bundled price table")
                     .font(.system(size: 10)).foregroundStyle(Theme.faint)
             }

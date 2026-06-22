@@ -14,8 +14,12 @@ struct PanelHeader<P: View>: View {
         HStack {
             HStack(spacing: 8) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 5).fill(Color(hex8: 0x1C1D22))
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(LinearGradient(colors: [Color(hex8: 0x26272E), Color(hex8: 0x15161B)],
+                                             startPoint: .top, endPoint: .bottom))
                         .frame(width: 18, height: 18)
+                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
                     BrandMark(size: 11, lineWidth: 2.4, fraction: 0.63, color: Theme.green)
                 }
                 Text("Token Tab").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
@@ -31,6 +35,7 @@ struct PanelHeader<P: View>: View {
 struct DropdownView: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var access: AccessManager
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Group {
@@ -48,8 +53,12 @@ struct DropdownView: View {
             }
         }
         .frame(width: 322)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 13))
+        .background(.ultraThickMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Theme.panelStroke(scheme), lineWidth: 0.75)
+        )
     }
 
     private var content: some View {
@@ -83,12 +92,15 @@ struct DropdownView: View {
     }
 
     private var loading: some View {
-        VStack(spacing: 10) {
-            BrandMark(size: 26, lineWidth: 3, fraction: 0.3, color: Theme.green)
-                .rotationEffect(.degrees(0))
-            Text("Reading ~/.claude…").font(.system(size: 12)).foregroundStyle(Theme.muted)
+        TimelineView(.animation) { ctx in
+            let angle = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360
+            VStack(spacing: 10) {
+                BrandMark(size: 26, lineWidth: 3, fraction: 0.3, color: Theme.green)
+                    .rotationEffect(.degrees(angle))
+                Text("Reading ~/.claude…").font(.system(size: 12)).foregroundStyle(Theme.muted)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 46)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 46)
     }
 
     private func updatedAgo(_ date: Date) -> String {
@@ -118,7 +130,7 @@ struct GrantView: View {
             .padding(.horizontal, 20)
             Button {
                 access.requestAccess()
-                if access.logDir != nil { store.refresh() }
+                if access.logDir != nil { store.accessChanged() }
             } label: {
                 Text("Choose ~/.claude…").frame(maxWidth: .infinity)
             }

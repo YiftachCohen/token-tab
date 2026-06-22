@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Token Tab — monochrome menu-bar glyph (V1 · Gauge).
+     Single-color template: uses currentColor so the system tints it to match the bar
+     (light or dark). Same gauge as the app icon, the ~63% small-size treatment. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 15 15">
+  <circle cx="7.5" cy="7.5" r="6" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="2"/>
+  <circle cx="7.5" cy="7.5" r="6" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-dasharray="37.7" stroke-dashoffset="13.95"
+          transform="rotate(-90 7.5 7.5)"/>
+</svg>

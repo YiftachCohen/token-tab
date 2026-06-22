@@ -108,6 +108,17 @@ public struct WindowStats: Sendable {
         guard cap > 0 else { return nil }
         return Int((Double(tokens) / Double(cap) * 100).rounded())
     }
+
+    /// Runway REMAINING as a percent — the headline number (ring + menu bar). Token-based
+    /// when a cap is configured (the real throttle metric), otherwise the exact fraction of
+    /// the 5-hour window's TIME that's left (always known, never a guessed cap). nil when
+    /// the window is idle.
+    public func runwayLeftPercent(now: Date) -> Int? {
+        guard active else { return nil }
+        if let used = tokenPct { return max(0, min(100, 100 - used)) }
+        guard let secs = secondsToReset(now: now), blockSeconds > 0 else { return nil }
+        return max(0, min(100, Int((secs / blockSeconds * 100).rounded())))
+    }
 }
 
 /// Main (direct) vs sub-agent (sidechain) split — the design's "MAIN vs SUB-AGENT".

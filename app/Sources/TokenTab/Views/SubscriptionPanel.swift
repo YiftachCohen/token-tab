@@ -21,8 +21,9 @@ struct SubscriptionPanel: View {
         return max(0, min(1, 1 - secs / w.blockSeconds))
     }
     private var leftFraction: Double { max(0, 1 - usedFraction) }
-    private var leftPct: Int { Int((leftFraction * 100).rounded()) }
-    private var usedPct: Int { Int((usedFraction * 100).rounded()) }
+    // Single source of truth (shared with the menu-bar glyph) so ring % and bar % agree.
+    private var leftPct: Int { w.runwayLeftPercent(now: now) ?? Int((leftFraction * 100).rounded()) }
+    private var usedPct: Int { 100 - leftPct }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -33,7 +34,8 @@ struct SubscriptionPanel: View {
                 RingGauge(fraction: leftFraction, size: 104, lineWidth: 10, color: Theme.green) {
                     VStack(spacing: 0) {
                         HStack(alignment: .firstTextBaseline, spacing: 0) {
-                            Text("\(leftPct)").font(Theme.figure(30))
+                            Text("\(leftPct)").font(Theme.figure(31, weight: .semibold))
+                                .tracking(Theme.tightTracking(31))
                             Text("%").font(Theme.figure(17)).foregroundStyle(Theme.faint)
                         }
                         Text("left").font(.system(size: 10)).foregroundStyle(Theme.muted)
@@ -43,6 +45,7 @@ struct SubscriptionPanel: View {
                     SectionLabel(text: "RUNWAY")
                     Text(w.active ? Fmt.duration(w.secondsToReset(now: now)) : "idle")
                         .font(Theme.figure(30, weight: .bold))
+                        .tracking(Theme.tightTracking(30))
                         .foregroundStyle(Theme.ink)
                     Text(w.active
                          ? "left in this 5-hour\nwindow · resets \(Fmt.clock(w.resetAt))"

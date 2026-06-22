@@ -27,7 +27,7 @@ struct TokenTabApp: App {
         MenuBarExtra {
             DropdownView(store: store, access: access)
         } label: {
-            MenuBarLabel(snapshot: store.snapshot, menuMetric: store.menuMetric)
+            MenuBarLabel(snapshot: store.snapshot, menuMetric: store.menuMetric, now: store.clock)
                 .onAppear { startup() }   // the label is present at launch → runs immediately
         }
         .menuBarExtraStyle(.window)

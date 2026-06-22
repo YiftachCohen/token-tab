@@ -24,7 +24,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$BIN_NAME"
 cp "$HERE/Bundle/Info.plist" "$APP/Contents/Info.plist"
-[ -f "$HERE/Bundle/AppIcon.icns" ] && cp "$HERE/Bundle/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns" || true
+# App icon (a gitignored build artifact) — generate from the gauge design if absent.
+[ -f "$HERE/Bundle/AppIcon.icns" ] || { echo "▸ Generating AppIcon.icns…"; bash "$HERE/Scripts/make-icon.sh"; }
+cp "$HERE/Bundle/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 echo "▸ Signing (ad-hoc) with App Sandbox entitlements…"
 codesign --force --sign - \

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Token Tab — app icon (V1 · Gauge). The usage meter itself: a dark squircle tile
+     with the live progress ring. Faithful to the design handoff "app icon" treatment
+     (ring r=18, stroke 6, ~70% green arc), scaled to a 1024 canvas. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0.329" y1="0.030" x2="0.671" y2="0.970">
+      <stop offset="0" stop-color="#26272e"/>
+      <stop offset="1" stop-color="#15161b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- dark squircle tile (border-radius 24/104) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="236" ry="236" fill="url(#tile)"/>
+  <!-- subtle inner top highlight (inset 0 1px 0 rgba(255,255,255,.06)) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="236" ry="236" fill="none"
+        stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
+
+  <!-- gauge: background ring + ~70% progress arc -->
+  <circle cx="512" cy="512" r="190" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="63"/>
+  <circle cx="512" cy="512" r="190" fill="none" stroke="#36c98a" stroke-width="63"
+          stroke-linecap="round" stroke-dasharray="1193.81" stroke-dashoffset="358.9"
+          transform="rotate(-90 512 512)"/>
+</svg>

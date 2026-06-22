@@ -45,6 +45,20 @@ write nothing anywhere.
 
 You can also open the package in Xcode (`File ▸ Open ▸ app/Package.swift`) and hit Run.
 
+## App icon
+
+<img src="Branding/gauge-appicon.png" alt="Token Tab app icon" width="96" align="right">
+
+The icon is the **gauge** mark (the design's V1): a dark squircle with the live progress
+ring. It's drawn vector-first with Core Graphics in [`Scripts/make-icon.swift`](Scripts/make-icon.swift),
+so it stays crisp from 16px up — no external rasterizer needed. `Scripts/make-icon.sh`
+packs the `.iconset` into `Bundle/AppIcon.icns` with `iconutil`.
+
+`AppIcon.icns` is a **build artifact** (gitignored). `build-app.sh` copies it into the
+bundle and regenerates it on demand if it's missing, and `Info.plist` points at it via
+`CFBundleIconFile`. The shared vector sources and web assets (favicon, wordmark) live in
+[`Branding/`](Branding) — see the repo README's *Branding* section.
+
 ## The two-minute audit (native build)
 
 ```sh
@@ -84,8 +98,11 @@ app/
     TokenTabApp.swift           @main MenuBarExtra agent (LSUIElement, no Dock icon)
     Model/                      LogReader, Access (security-scoped grant), UsageStore, Config, Probe
     Views/                      Theme, Components, MenuBarLabel, SubscriptionPanel, BurnPanel, DropdownView
-  Bundle/                       Info.plist + TokenTab.entitlements (sandbox, no network)
-  Scripts/build-app.sh          assemble + ad-hoc-sign the .app
+  Bundle/                       Info.plist (CFBundleIconFile) + TokenTab.entitlements (sandbox, no network)
+  Branding/                     gauge logo sources (SVG) + generated favicons / wordmark / hero
+  Scripts/build-app.sh          assemble + ad-hoc-sign the .app (regenerates the icon if missing)
+  Scripts/make-icon.swift       Core Graphics renderer for the gauge mark (iconset / favicon / hero)
+  Scripts/make-icon.sh          → Bundle/AppIcon.icns   ·   make-branding.sh → web/README assets
   Tests/TokenTabCoreTests/      parity tests ported from ../test/core.test.mjs
 ```
 
@@ -96,5 +113,7 @@ app/
   subscription side-metric shows the Claude row only until it ships.
 - **Notarization is deferred.** The build is ad-hoc-signed for local use; a Developer ID
   + notary round-trip is the step before handing the `.app` to someone else.
-- **Refresh** is a 10s timer plus on-demand; an FSEvents watch on `~/.claude` (idle CPU ~0)
-  is the planned upgrade.
+- **Refresh** is event-driven: an **FSEvents** watch on `~/.claude` re-reads only when the
+  logs actually change (debounced), so updates are near-instant and idle CPU is ~0 (no
+  polling). A 30s clock tick advances the runway display without touching disk, and a 90s
+  safety refresh covers the rare case the stream can't start (e.g. an unusual sandbox).

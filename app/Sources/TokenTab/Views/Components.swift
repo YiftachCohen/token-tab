@@ -126,14 +126,39 @@ struct Pill: View {
     }
 }
 
+/// A small accent dot with a soft glow (health dot, live indicator, trust dot).
+struct GlowDot: View {
+    var color: Color
+    var size: CGFloat = 6
+    var glow: CGFloat = 4
+    var body: some View {
+        Circle().fill(color).frame(width: size, height: size)
+            .shadow(color: color.opacity(0.7), radius: glow)
+    }
+}
+
 /// Footer trust line with a green dot (matches "Local only — nothing leaves this Mac").
 struct TrustFooter: View {
     var text: String
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(Theme.green).frame(width: 6, height: 6)
+            GlowDot(color: Theme.green)
             Text(text).font(.system(size: 10.5)).foregroundStyle(Theme.faint)
         }
         .frame(maxWidth: .infinity)
     }
+}
+
+/// Inset card chrome (subtle fill + hairline), adaptive to appearance.
+struct Card: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    var radius: CGFloat = 10
+    func body(content: Content) -> some View {
+        content
+            .background(Theme.cardFill(scheme), in: RoundedRectangle(cornerRadius: radius))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Theme.cardStroke(scheme), lineWidth: 0.5))
+    }
+}
+extension View {
+    func card(radius: CGFloat = 10) -> some View { modifier(Card(radius: radius)) }
 }
