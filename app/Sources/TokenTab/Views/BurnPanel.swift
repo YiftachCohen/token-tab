@@ -100,7 +100,7 @@ struct BurnPanel: View {
     private var subFrac: Double { split.total > 0 ? Double(split.subTokens) / Double(split.total) : 0 }
 
     private var pillText: String {
-        agg.dominantSurface == .bedrock ? "BEDROCK" : "PAY-PER-TOKEN"
+        snapshot.surface == .bedrock ? "BEDROCK" : "PAY-PER-TOKEN"
     }
 
     /// "Claude · Opus · Sonnet · Haiku" — the agent plus the model tiers actually present.
