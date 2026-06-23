@@ -138,7 +138,10 @@ rates are visible and editable in one short file; that's the trade.
 - `CLAUDE_CONFIG_DIR`: respected (reads `$CLAUDE_CONFIG_DIR/projects`).
 - `TOKENTAB_WINDOW_CAP`: your plan's 5h token cap, to show a window `%`. If unset, only
   the exact reset countdown shows (no guessed `%`). Derive it from Claude's `/usage`
-  (see below).
+  (see below). The native app also lets you set this in the dropdown (stored in
+  UserDefaults) or learns it automatically from a live reading — see "live server %".
+- `TOKENTAB_LIVE_CACHE`: where the live sidecar (`adapters/write-live.mjs`) writes its JSON
+  and the native app reads it. Defaults to `<logDir>/.token-tab-live.json`.
 - `TOKENTAB_LIVE`: opt in to the authoritative live server `%` via `claude -p "/usage"`
   (`1`/`true`/`yes`/`on`; canonical `=1`). Off by default. See "The live server %" below.
 - `TOKENTAB_CLAUDE_BIN`: absolute path to the `claude` binary, when it isn't auto-resolved
@@ -183,9 +186,22 @@ the network call, and Token Tab only parses the printed summary (zero token cost
 - **Fails closed.** If `claude` can't be resolved, times out, or the output format
   changes, it silently falls back to the local estimate and shows a gray
   `live unavailable` line (set `TOKENTAB_LIVE_DEBUG=1` for the reason).
-- **CLI/SwiftBar only.** An App-Sandboxed native app cannot spawn `claude`, so this
-  feature targets the CLI and SwiftBar form factor; the default build and the future
-  native app stay pure-local.
+- **Native app: via a sidecar cache (enforcement intact).** The App-Sandboxed menu-bar app
+  *cannot* spawn `claude` (no network entitlement — kernel-enforced), so it never reads live
+  itself. Instead the opt-in writer `adapters/write-live.mjs` runs the `/usage` call in a
+  separate, user-launched process and writes the parsed `%` to `<logDir>/.token-tab-live.json`;
+  the sandboxed app reads that file as plain data (it's inside the folder you already granted,
+  and both log walkers ignore it — hidden + not `*.jsonl`). The "cannot phone home" guarantee
+  stays fully enforced; the network lives entirely in the sidecar you scheduled. Run it on a
+  timer:
+
+      node adapters/write-live.mjs            # one-off
+      # or every ~2 min via launchd / cron / a SwiftBar wrapper
+
+  When a fresh reading is present the app headlines `91% left · live` and **learns your cap**
+  from it (cap ≈ window tokens ÷ session `%`), persisting it so a real `%` keeps showing after
+  the reading goes stale — no cap to look up by hand. Past a 10-minute freshness window the
+  `· live` tag drops and it falls back to that calibrated cap.
 - **On the menu bar:** install `swiftbar/token-tab-live.2m.sh` (refreshes every 2 minutes,
   sets `TOKENTAB_LIVE=1`, resolves `claude`). The default `token-tab.30s.sh` is unchanged
   and never spawns anything — `/usage` should not be polled every 30s.

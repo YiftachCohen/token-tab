@@ -36,16 +36,21 @@ struct MenuBarLabel: View {
         }
     }
 
-    /// Runway-left fraction for the ring (mirrors the panel ring; 0 when idle).
+    /// Runway-left fraction for the ring (mirrors the panel ring): quota (live or cap) when
+    /// we have one, else the time countdown. Same arc either way; the number says which.
     private var ringFraction: Double {
-        guard let pct = snapshot.agg.window.runwayLeftPercent(now: now) else { return 0 }
-        return Double(pct) / 100
+        if let q = snapshot.quotaLeft(now: now) { return Double(q.pct) / 100 }
+        return snapshot.agg.window.timeLeftFraction(now: now) ?? 0
     }
 
     private var text: String {
         switch snapshot.mode {
         case .subscription:
-            if let pct = snapshot.agg.window.runwayLeftPercent(now: now) { return "\(pct)%" }
+            // A "%" only when it's a real quota % (live or cap). Otherwise show the time left
+            // ("1h44") — honest about being a clock, never elapsed-time wearing a percent sign.
+            if let q = snapshot.quotaLeft(now: now) { return "\(q.pct)%" }
+            let w = snapshot.agg.window
+            if w.active { return Fmt.durationCompact(w.secondsToReset(now: now)) }
             return "—"
         case .burn:
             switch menuMetric {

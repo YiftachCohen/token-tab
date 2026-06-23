@@ -66,7 +66,7 @@ struct DropdownView: View {
             VStack(spacing: 0) {
                 switch store.snapshot.mode {
                 case .subscription:
-                    SubscriptionPanel(snapshot: store.snapshot, now: ctx.date)
+                    SubscriptionPanel(store: store, now: ctx.date)
                 case .burn:
                     BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric)
                 }

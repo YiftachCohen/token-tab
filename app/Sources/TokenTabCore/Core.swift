@@ -109,16 +109,72 @@ public struct WindowStats: Sendable {
         return Int((Double(tokens) / Double(cap) * 100).rounded())
     }
 
-    /// Runway REMAINING as a percent — the headline number (ring + menu bar). Token-based
-    /// when a cap is configured (the real throttle metric), otherwise the exact fraction of
-    /// the 5-hour window's TIME that's left (always known, never a guessed cap). nil when
-    /// the window is idle.
-    public func runwayLeftPercent(now: Date) -> Int? {
-        guard active else { return nil }
-        if let used = tokenPct { return max(0, min(100, 100 - used)) }
-        guard let secs = secondsToReset(now: now), blockSeconds > 0 else { return nil }
-        return max(0, min(100, Int((secs / blockSeconds * 100).rounded())))
+    /// QUOTA remaining as a percent — the headline gauge's only honest "% left". Token-based,
+    /// so it exists ONLY when a cap is configured (later: a live server reading). nil means
+    /// "no quota basis" — and the UI must then fall back to the time countdown rather than
+    /// dress elapsed time up as a usage %. Keeping this token-only is the whole framing fix:
+    /// a ring that reads "35% left" must mean 35% of the quota, never 35% of the clock.
+    public func quotaLeftPercent() -> Int? {
+        guard let used = tokenPct else { return nil }
+        return max(0, min(100, 100 - used))
     }
+
+    /// Fraction (0...1) of the window's TIME still left — the honest basis for the countdown
+    /// ring when there's no quota %. nil when idle. Deliberately a fraction (not a percent)
+    /// and deliberately separate from `quotaLeftPercent` so the two can't be swapped by
+    /// accident at a call site.
+    public func timeLeftFraction(now: Date) -> Double? {
+        guard active, let secs = secondsToReset(now: now), blockSeconds > 0 else { return nil }
+        return max(0, min(1, secs / blockSeconds))
+    }
+}
+
+// MARK: - Live server usage (opt-in) + cap calibration
+
+/// The authoritative server-side rate-limit reading, captured by the opt-in sidecar that
+/// runs the official `claude /usage` (the only thing that can know the real %). The app
+/// only ever READS this — it never makes the call itself, so the sandbox stays enforced.
+/// Every field is optional because `/usage` output drifts; we fail soft to whatever parsed.
+public struct LiveUsage: Sendable, Equatable {
+    public var sessionPct: Int?
+    public var sessionResetText: String?
+    public var weeklyPct: Int?
+    public var weeklyResetText: String?
+    public var weeklyByModel: [String: Int]
+    public var capturedAt: Date?
+
+    public init(sessionPct: Int? = nil, sessionResetText: String? = nil,
+                weeklyPct: Int? = nil, weeklyResetText: String? = nil,
+                weeklyByModel: [String: Int] = [:], capturedAt: Date? = nil) {
+        self.sessionPct = sessionPct
+        self.sessionResetText = sessionResetText
+        self.weeklyPct = weeklyPct
+        self.weeklyResetText = weeklyResetText
+        self.weeklyByModel = weeklyByModel
+        self.capturedAt = capturedAt
+    }
+
+    /// Fresh enough to headline as "· live". `/usage` moves slowly, but a reading hours old
+    /// must not pose as live — past the TTL we fall back to the calibrated cap (itself
+    /// derived from live), so the gauge stays true without lying about freshness. A small
+    /// negative age is tolerated for clock skew between the sidecar and the app.
+    public func isFresh(now: Date, ttl: TimeInterval = 600) -> Bool {
+        guard let capturedAt else { return false }
+        let age = now.timeIntervalSince(capturedAt)
+        return age >= -60 && age <= ttl
+    }
+}
+
+/// Derive the 5-hour token cap from a live session-% and our local window token count:
+/// cap ≈ tokens / (pct/100). This is how the user "sets a cap" without knowing it — the
+/// app learns it from one live reading and keeps showing a real % after live goes away.
+///
+/// Returns nil when the inputs are too noisy to trust. `sessionPct` is integer-rounded, so
+/// the relative error is ≈ 0.5/pct — ~5% at 10%, ~1% at 50%. Below `minPct` we decline
+/// rather than persist a wildly off cap from a tiny sample.
+public func calibrateCap(windowTokens: Int, sessionPct: Int, minPct: Int = 10) -> Int? {
+    guard windowTokens > 0, sessionPct >= minPct else { return nil }
+    return Int((Double(windowTokens) / (Double(sessionPct) / 100.0)).rounded())
 }
 
 /// Main (direct) vs sub-agent (sidechain) split — the design's "MAIN vs SUB-AGENT".

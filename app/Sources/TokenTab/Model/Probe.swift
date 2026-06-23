@@ -16,11 +16,12 @@ enum Probe {
         let files = LogReader.findJSONL(in: dir)
         let (records, malformed) = LogReader.readRecords(from: files)
         let agg = aggregate(records, options: AggregateOptions(cap: Config.windowCap), costModel: Pricing())
+        let live = LiveReader.read(logDir: dir)   // opt-in live cache, if the sidecar wrote one
 
         var surfaces: [String: Int] = [:]
         for (s, n) in agg.bySurface { surfaces[s.rawValue] = n }
 
-        let out: [String: Any] = [
+        var out: [String: Any] = [
             "files": files.count,
             "malformed": malformed,
             "counted": agg.counted,
@@ -49,6 +50,19 @@ enum Probe {
             ],
             "dominantSurface": agg.dominantSurface.rawValue,
         ]
+        // Live block mirrors what the app would headline: the server %, its freshness, and
+        // the cap the app would learn from it (cap ≈ window tokens / sessionPct).
+        if let l = live {
+            var liveOut: [String: Any] = [
+                "fresh": l.isFresh(now: Date()),
+                "sessionPct": l.sessionPct ?? -1,
+                "weeklyPct": l.weeklyPct ?? -1,
+            ]
+            if let p = l.sessionPct, let cap = calibrateCap(windowTokens: agg.window.tokens, sessionPct: p) {
+                liveOut["calibratedCap"] = cap
+            }
+            out["live"] = liveOut
+        }
         if let data = try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys]),
            let s = String(data: data, encoding: .utf8) {
             print(s)

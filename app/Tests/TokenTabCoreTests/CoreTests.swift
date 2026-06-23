@@ -116,6 +116,54 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(a.window.tokenPct, 50)
     }
 
+    /// The framing fix: a "% left" must always mean quota, never the clock. Without a cap
+    /// there is NO quota %, even though the window is active and most of its TIME is left —
+    /// that time is exposed only as a fraction (for the countdown ring), never as a percent.
+    func testRunwayFramingTimeNeverPosesAsQuota() {
+        let now = date("2026-06-20T18:00:00Z")
+        let records = [
+            rec(messageId: "a1", requestId: "ar1", usage: u(200, 0, 0, 0), timestamp: "2026-06-20T16:30:00Z"),
+            rec(messageId: "a2", requestId: "ar2", usage: u(100, 0, 0, 0), timestamp: "2026-06-20T17:00:00Z"),
+        ]
+        // No cap → no quota %, but 70% of the 5h window's time remains (3.5h of 5h).
+        let noCap = aggregate(records, options: AggregateOptions(now: now))
+        XCTAssertNil(noCap.window.quotaLeftPercent(), "no cap → never report time as a quota %")
+        XCTAssertEqual(noCap.window.timeLeftFraction(now: now)!, 0.7, accuracy: 0.01)
+
+        // With a cap the quota % is real and token-based (100 − 50% used), not time-derived.
+        let capped = aggregate(records, options: AggregateOptions(now: now, cap: 600))
+        XCTAssertEqual(capped.window.quotaLeftPercent(), 50)
+
+        // Idle window: neither basis exists.
+        let idle = aggregate([rec(messageId: "y", requestId: "yr", usage: u(1000, 0, 0, 0), timestamp: "2026-06-19T10:00:00Z")],
+                             options: AggregateOptions(now: now))
+        XCTAssertNil(idle.window.quotaLeftPercent())
+        XCTAssertNil(idle.window.timeLeftFraction(now: now))
+    }
+
+    func testCalibrateCapFromLiveSessionPct() {
+        // cap ≈ tokens / (pct/100). 300 tokens at 50% → 600 (inverse of testWindowCapGivesPct).
+        XCTAssertEqual(calibrateCap(windowTokens: 300, sessionPct: 50), 600)
+        XCTAssertEqual(calibrateCap(windowTokens: 1000, sessionPct: 10), 10_000)
+        // Below the trust floor (default 10%) we decline — a tiny sample makes a noisy cap.
+        XCTAssertNil(calibrateCap(windowTokens: 300, sessionPct: 9))
+        XCTAssertNil(calibrateCap(windowTokens: 300, sessionPct: 1))
+        // No tokens in the window → nothing to calibrate from.
+        XCTAssertNil(calibrateCap(windowTokens: 0, sessionPct: 50))
+    }
+
+    func testLiveFreshness() {
+        let now = date("2026-06-23T10:00:00Z")
+        XCTAssertTrue(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:55:00Z")).isFresh(now: now),
+                      "5 minutes old is fresh")
+        XCTAssertFalse(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:30:00Z")).isFresh(now: now),
+                       "30 minutes old is stale (default 10m TTL)")
+        XCTAssertTrue(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T10:00:30Z")).isFresh(now: now),
+                      "tolerate minor clock skew (sidecar slightly ahead)")
+        XCTAssertFalse(LiveUsage(sessionPct: 9, capturedAt: nil).isFresh(now: now),
+                       "no timestamp is never fresh")
+    }
+
     func testWindowIdle() {
         let now = date("2026-06-20T18:00:00Z")
         let a = aggregate([rec(messageId: "y", requestId: "yr", usage: u(1000, 0, 0, 0), timestamp: "2026-06-19T10:00:00Z")],

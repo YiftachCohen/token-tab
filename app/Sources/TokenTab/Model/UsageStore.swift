@@ -34,9 +34,21 @@ struct Snapshot {
     var malformed: Int
     var lastUpdated: Date
     var cap: Int
+    var live: LiveUsage?
 
     static let empty = Snapshot(agg: Aggregate(), mode: .burn, health: .neutral,
-                                fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0)
+                                fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0, live: nil)
+
+    /// The headline quota %, resolved down the trust ladder: a FRESH live reading first (the
+    /// real server number), then a cap-based % (manual or live-calibrated). nil → no quota
+    /// basis at all, so the UI shows the honest time countdown. `source` lets the UI label it.
+    func quotaLeft(now: Date) -> (pct: Int, source: String)? {
+        if let l = live, l.isFresh(now: now), let p = l.sessionPct {
+            return (max(0, min(100, 100 - p)), "live")
+        }
+        if let p = agg.window.quotaLeftPercent() { return (p, "cap") }
+        return nil
+    }
 }
 
 @MainActor
@@ -53,6 +65,32 @@ final class UsageStore: ObservableObject {
         didSet { UserDefaults.standard.set(menuMetric.rawValue, forKey: "menuMetric") }
     }
 
+    /// Persisted: the user's 5-hour token cap, set from the dropdown. 0 = unset. This is the
+    /// sandbox-clean way to "set a cap locally" — UserDefaults, no dotfile to hand-edit.
+    /// Changing it re-aggregates, which flips the runway from a time countdown to a real
+    /// quota %. Env/dotfile `TOKENTAB_WINDOW_CAP` still works as a fallback (see effectiveCap).
+    @Published var capOverride: Int {
+        didSet {
+            UserDefaults.standard.set(capOverride, forKey: "windowCap")
+            refresh()
+        }
+    }
+
+    /// Persisted: the cap LEARNED from a live reading (cap ≈ window tokens / sessionPct). Set
+    /// only during refresh, never typed by the user. Persisting it is what lets the gauge keep
+    /// showing a real % after the live reading goes stale or the sidecar stops.
+    @Published var calibratedCap: Int {
+        didSet { UserDefaults.standard.set(calibratedCap, forKey: "calibratedCap") }
+    }
+
+    /// The cap fed to the aggregator, by precedence: a manual override wins (explicit intent),
+    /// then the live-calibrated cap, then env/dotfile config.
+    var effectiveCap: Int {
+        if capOverride > 0 { return capOverride }
+        if calibratedCap > 0 { return calibratedCap }
+        return Config.windowCap
+    }
+
     private var watcher: FolderWatcher?
     private var displayTimer: Timer?
     private var lastRefresh = Date.distantPast
@@ -62,6 +100,8 @@ final class UsageStore: ObservableObject {
         self.logDirProvider = logDir
         let raw = UserDefaults.standard.string(forKey: "menuMetric") ?? MenuMetric.cost.rawValue
         self.menuMetric = MenuMetric(rawValue: raw) ?? .cost
+        self.capOverride = UserDefaults.standard.integer(forKey: "windowCap")        // 0 when unset
+        self.calibratedCap = UserDefaults.standard.integer(forKey: "calibratedCap")  // 0 when unset
     }
 
     func start() {
@@ -111,31 +151,42 @@ final class UsageStore: ObservableObject {
         guard let dir = logDirProvider() else { return }
         if isRefreshing { return }
         isRefreshing = true
-        let cap = Config.windowCap
+        let cap = effectiveCap
         Task.detached(priority: .utility) {
             let files = LogReader.findJSONL(in: dir)
             let (records, malformed) = LogReader.readRecords(from: files)
             let agg = aggregate(records,
                                 options: AggregateOptions(cap: cap),
                                 costModel: Pricing())
+            let live = LiveReader.read(logDir: dir)   // opt-in cache; nil when no sidecar runs
             await MainActor.run {
+                let now = Date()
                 let mode: Mode = agg.dominantSurface == .subscription ? .subscription : .burn
-                let health = Self.health(for: agg, mode: mode)
+                let health = Self.health(for: agg, live: live, now: now, mode: mode)
                 self.snapshot = Snapshot(agg: agg, mode: mode, health: health,
                                          fileCount: files.count, malformed: malformed,
-                                         lastUpdated: Date(), cap: cap)
+                                         lastUpdated: now, cap: cap, live: live)
+                // Learn the cap from a fresh live reading (cap ≈ tokens / sessionPct) so a real
+                // % survives once live goes stale. Takes effect on the next refresh's cap.
+                if let l = live, l.isFresh(now: now), let p = l.sessionPct,
+                   let learned = calibrateCap(windowTokens: agg.window.tokens, sessionPct: p),
+                   learned != self.calibratedCap {
+                    self.calibratedCap = learned
+                }
                 self.isRefreshing = false
                 self.hasLoadedOnce = true
-                self.lastRefresh = Date()
-                self.clock = Date()
+                self.lastRefresh = now
+                self.clock = now
             }
         }
     }
 
-    /// Health is a real throttle signal only when we have a cap (token % of the window).
-    /// Without a cap we never invent danger — the dot stays green.
-    private static func health(for agg: Aggregate, mode: Mode) -> Health {
-        guard mode == .subscription, let pct = agg.window.tokenPct else { return .neutral }
+    /// Health is a real throttle signal only when we have a usage % — a fresh live reading
+    /// (preferred) or the cap-based token %. Without either we never invent danger (green).
+    private static func health(for agg: Aggregate, live: LiveUsage?, now: Date, mode: Mode) -> Health {
+        guard mode == .subscription else { return .neutral }
+        let used: Int? = (live?.isFresh(now: now) == true ? live?.sessionPct : nil) ?? agg.window.tokenPct
+        guard let pct = used else { return .neutral }
         switch pct {
         case ..<70: return .healthy
         case 70..<90: return .near
