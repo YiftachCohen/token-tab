@@ -29,13 +29,16 @@ enum MenuMetric: String { case cost, tokens }
 struct Snapshot {
     var agg: Aggregate
     var mode: Mode
+    /// The surface the UI actually renders (drives the header pill). Normally the auto-
+    /// detected dominant surface; a TOKENTAB_MODE override replaces it.
+    var surface: Surface
     var health: Health
     var fileCount: Int
     var malformed: Int
     var lastUpdated: Date
     var cap: Int
 
-    static let empty = Snapshot(agg: Aggregate(), mode: .burn, health: .neutral,
+    static let empty = Snapshot(agg: Aggregate(), mode: .burn, surface: .untracked, health: .neutral,
                                 fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0)
 }
 
@@ -118,10 +121,13 @@ final class UsageStore: ObservableObject {
             let agg = aggregate(records,
                                 options: AggregateOptions(cap: cap),
                                 costModel: Pricing())
+            let override = Config.surfaceOverride
             await MainActor.run {
-                let mode: Mode = agg.dominantSurface == .subscription ? .subscription : .burn
+                // TOKENTAB_MODE wins; otherwise the dominant model-id surface decides.
+                let surface = override ?? agg.dominantSurface
+                let mode: Mode = surface == .subscription ? .subscription : .burn
                 let health = Self.health(for: agg, mode: mode)
-                self.snapshot = Snapshot(agg: agg, mode: mode, health: health,
+                self.snapshot = Snapshot(agg: agg, mode: mode, surface: surface, health: health,
                                          fileCount: files.count, malformed: malformed,
                                          lastUpdated: Date(), cap: cap)
                 self.isRefreshing = false

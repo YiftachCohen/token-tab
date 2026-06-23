@@ -6,6 +6,7 @@
 // only — no network, no secrets.
 
 import Foundation
+import TokenTabCore
 
 enum Config {
     private static func loadFileValues() -> [String: String] {
@@ -42,5 +43,19 @@ enum Config {
     static var windowCap: Int {
         guard let v = string("TOKENTAB_WINDOW_CAP"), let n = Int(v), n > 0 else { return 0 }
         return n
+    }
+
+    /// Force the displayed surface (TOKENTAB_MODE), overriding model-id auto-detection.
+    /// Needed because Claude Code on Bedrock logs bare `claude-*` ids with no `us.anthropic.`
+    /// prefix — so auto-detection (classifySurface) sees only subscription. Returns nil to
+    /// keep auto-detection. Accepts: bedrock | subscription (max/pro) | payg (pay-per-token/api).
+    static var surfaceOverride: Surface? {
+        guard let v = string("TOKENTAB_MODE")?.lowercased() else { return nil }
+        switch v {
+        case "bedrock": return .bedrock
+        case "subscription", "max", "pro", "sub": return .subscription
+        case "payg", "pay-per-token", "paypertoken", "api", "untracked": return .untracked
+        default: return nil
+        }
     }
 }
