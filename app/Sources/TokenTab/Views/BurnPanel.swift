@@ -99,11 +99,12 @@ struct BurnPanel: View {
     private var mainFrac: Double { split.total > 0 ? Double(split.mainTokens) / Double(split.total) : 0 }
     private var subFrac: Double { split.total > 0 ? Double(split.subTokens) / Double(split.total) : 0 }
 
-    /// "BEDROCK" only when CLAUDE_CODE_USE_BEDROCK opted in — that's the one deliberate
-    /// Bedrock signal. Everything else pay-per-token is the generic "API": we don't claim
-    /// a backend we can't prove from the logs (bare claude-* ids look identical).
+    /// "BEDROCK" only when a deliberate signal said so — TOKENTAB_MODE=bedrock or the
+    /// CLAUDE_CODE_USE_BEDROCK flag (both resolve to `surface == .bedrock`). Everything else
+    /// pay-per-token is the generic "API": we don't claim a backend we can't prove from the
+    /// logs (bare claude-* ids look identical).
     private var pillText: String {
-        snapshot.forceBedrock ? "BEDROCK" : "API"
+        snapshot.surface == .bedrock ? "BEDROCK" : "API"
     }
 
     /// "Claude · Opus · Sonnet · Haiku" — the agent plus the model tiers actually present.

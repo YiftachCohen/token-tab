@@ -29,17 +29,18 @@ enum MenuMetric: String { case cost, tokens }
 struct Snapshot {
     var agg: Aggregate
     var mode: Mode
+    /// The surface the UI actually renders (drives the header pill). Normally the auto-
+    /// detected dominant surface; a TOKENTAB_MODE override — or the CLAUDE_CODE_USE_BEDROCK
+    /// flag — replaces it (the logs alone can't tell Bedrock from a subscription).
+    var surface: Surface
     var health: Health
     var fileCount: Int
     var malformed: Int
     var lastUpdated: Date
     var cap: Int
     var live: LiveUsage?
-    /// CLAUDE_CODE_USE_BEDROCK forced the Bedrock panel (the logs alone can't tell Bedrock
-    /// from a subscription). Lets the burn panel show the "BEDROCK" pill, not "API".
-    var forceBedrock: Bool = false
 
-    static let empty = Snapshot(agg: Aggregate(), mode: .burn, health: .neutral,
+    static let empty = Snapshot(agg: Aggregate(), mode: .burn, surface: .untracked, health: .neutral,
                                 fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0, live: nil)
 
     /// The headline quota %, resolved down the trust ladder: a FRESH live reading first (the
@@ -167,16 +168,18 @@ final class UsageStore: ObservableObject {
                                 options: AggregateOptions(cap: cap),
                                 costModel: Pricing())
             let live = LiveReader.read(logDir: dir)   // opt-in cache; nil when no sidecar runs
+            let override = Config.surfaceOverride
             await MainActor.run {
                 let now = Date()
-                // CLAUDE_CODE_USE_BEDROCK forces burn mode: Bedrock logs bare claude-* ids
-                // that otherwise read as a subscription, so the flag is the only honest signal.
-                let mode: Mode = (forceBedrock || agg.dominantSurface != .subscription) ? .burn : .subscription
+                // Surface precedence: an explicit TOKENTAB_MODE wins; else CLAUDE_CODE_USE_BEDROCK
+                // forces Bedrock (logs bare claude-* ids otherwise read as a subscription); else
+                // the dominant model-id surface. mode follows: anything non-subscription is burn.
+                let surface = override ?? (forceBedrock ? .bedrock : agg.dominantSurface)
+                let mode: Mode = surface == .subscription ? .subscription : .burn
                 let health = Self.health(for: agg, live: live, now: now, mode: mode)
-                self.snapshot = Snapshot(agg: agg, mode: mode, health: health,
+                self.snapshot = Snapshot(agg: agg, mode: mode, surface: surface, health: health,
                                          fileCount: files.count, malformed: malformed,
-                                         lastUpdated: now, cap: cap, live: live,
-                                         forceBedrock: forceBedrock)
+                                         lastUpdated: now, cap: cap, live: live)
                 // Learn the cap from a fresh live reading (cap ≈ tokens / sessionPct) so a real
                 // % survives once live goes stale. Takes effect on the next refresh's cap.
                 if let l = live, l.isFresh(now: now), let p = l.sessionPct,

@@ -8,6 +8,7 @@
 // too. Reads a local file only — no network, no secrets.
 
 import Foundation
+import TokenTabCore
 
 enum Config {
     private static func loadFileValues() -> [String: String] {
@@ -79,5 +80,20 @@ enum Config {
         guard let v = string("CLAUDE_CODE_USE_BEDROCK")?
             .trimmingCharacters(in: .whitespaces).lowercased() else { return false }
         return v == "1" || v == "true" || v == "yes" || v == "on"
+    }
+
+    /// Force the displayed surface (TOKENTAB_MODE), overriding model-id auto-detection.
+    /// Needed because Claude Code on Bedrock logs bare `claude-*` ids with no `us.anthropic.`
+    /// prefix — so auto-detection (classifySurface) sees only subscription. Returns nil to
+    /// keep auto-detection. Accepts: bedrock | subscription (max/pro) | payg (pay-per-token/api).
+    /// Takes precedence over `useBedrock`: an explicit mode beats the inferred Bedrock flag.
+    static var surfaceOverride: Surface? {
+        guard let v = string("TOKENTAB_MODE")?.lowercased() else { return nil }
+        switch v {
+        case "bedrock": return .bedrock
+        case "subscription", "max", "pro", "sub": return .subscription
+        case "payg", "pay-per-token", "paypertoken", "api", "untracked": return .untracked
+        default: return nil
+        }
     }
 }
