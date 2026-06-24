@@ -7,6 +7,7 @@
 // offers an inline field to set the cap locally (UserDefaults), which flips it to a real %.
 
 import SwiftUI
+import AppKit
 import TokenTabCore
 
 struct SubscriptionPanel: View {
@@ -15,6 +16,7 @@ struct SubscriptionPanel: View {
 
     @State private var editingCap = false
     @State private var capText = ""
+    @State private var showLiveHelp = false
 
     private var snapshot: Snapshot { store.snapshot }
     private var w: WindowStats { snapshot.agg.window }
@@ -168,9 +170,98 @@ struct SubscriptionPanel: View {
             .padding(.horizontal, 18).padding(.top, 13)
 
             Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
-            TrustFooter(text: "Local only — nothing leaves this Mac")
-                .padding(.vertical, 12)
+            VStack(alignment: .leading, spacing: 9) {
+                liveStatusRow
+                TrustFooter(text: "Local only — nothing leaves this Mac")
+            }
+            .padding(.vertical, 12)
         }
+    }
+
+    /// Footer line that makes the live boundary legible: where the % comes from, whether
+    /// it's fresh — and, when it isn't, the exact command to turn it on. The app can't run
+    /// the sidecar itself (sandboxed, no network), so honesty here means handing over the
+    /// command, not hiding a button that could never work.
+    @ViewBuilder private var liveStatusRow: some View {
+        if let l = snapshot.live, l.isFresh(now: now) {
+            HStack(spacing: 6) {
+                GlowDot(color: Theme.green, size: 5, glow: 3)
+                Text("Live · claude /usage · \(liveAgo(l))")
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
+            }
+            .padding(.horizontal, 18)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
+                    HStack(spacing: 6) {
+                        Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
+                        Text(snapshot.live == nil ? "Live %: off" : "Live · stale")
+                            .font(.system(size: 10.5))
+                        Image(systemName: showLiveHelp ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 7, weight: .semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.faint).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if showLiveHelp { liveHelp }
+            }
+            .padding(.horizontal, 18)
+        }
+    }
+
+    private var liveHelp: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("The live % comes from `claude /usage`. This app is sandboxed (no network), so a small helper fetches it. One-time setup — it installs a background agent that refreshes every ~5 min:")
+                .font(.system(size: 10.5)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            commandChip(display: "adapters/install-live.sh", copy: installCopy, note: "auto-refresh")
+            commandChip(display: "node adapters/write-live.mjs", copy: nodeCopy, note: "once")
+            Text(adaptersDir == nil
+                 ? "Run from the Token Tab folder. See README › Turn on live."
+                 : "Copy → paste in Terminal once; it keeps running in the background. Stop it with `install-live.sh uninstall`. See README › Turn on live.")
+                .font(.system(size: 10)).foregroundStyle(Theme.faint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .transition(.opacity)
+    }
+
+    /// Absolute, cwd-independent commands when we can locate the repo's `adapters/` — so the
+    /// copied command runs from any directory. The chip still SHOWS the short relative form
+    /// (readable); only the copied string is the full path. Falls back to relative if unknown.
+    private var adaptersDir: URL? { Config.adaptersDir() }
+    private var installCopy: String {
+        adaptersDir.map { shellQuoted($0.appendingPathComponent("install-live.sh")) } ?? "adapters/install-live.sh"
+    }
+    private var nodeCopy: String {
+        adaptersDir.map { "node " + shellQuoted($0.appendingPathComponent("write-live.mjs")) } ?? "node adapters/write-live.mjs"
+    }
+    private func shellQuoted(_ url: URL) -> String { "'" + url.path + "'" }  // path may contain spaces
+
+    private func commandChip(display: String, copy: String, note: String) -> some View {
+        HStack(spacing: 8) {
+            Text(display).font(Theme.mono(10)).foregroundStyle(Theme.ink)
+                .lineLimit(1).truncationMode(.middle)
+                .padding(.vertical, 4).padding(.horizontal, 7)
+                .background(Theme.subtleFill, in: RoundedRectangle(cornerRadius: 6))
+            Button { copyCommand(copy) } label: {
+                Image(systemName: "doc.on.doc").font(.system(size: 10))
+            }
+            .buttonStyle(.plain).foregroundStyle(Theme.green)
+            Text(note).font(.system(size: 9.5)).foregroundStyle(Theme.faint)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func copyCommand(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+    }
+
+    private func liveAgo(_ l: LiveUsage) -> String {
+        guard let c = l.capturedAt else { return "just now" }
+        let s = Int(now.timeIntervalSince(c))
+        return s < 60 ? "\(max(0, s))s ago" : "\(s / 60)m ago"
     }
 
     /// Header badge: a pulsing LIVE dot when the % is from a fresh `claude /usage` reading,

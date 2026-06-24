@@ -35,6 +35,9 @@ struct Snapshot {
     var lastUpdated: Date
     var cap: Int
     var live: LiveUsage?
+    /// CLAUDE_CODE_USE_BEDROCK forced the Bedrock panel (the logs alone can't tell Bedrock
+    /// from a subscription). Lets the burn panel show the "BEDROCK" pill, not "API".
+    var forceBedrock: Bool = false
 
     static let empty = Snapshot(agg: Aggregate(), mode: .burn, health: .neutral,
                                 fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0, live: nil)
@@ -95,6 +98,9 @@ final class UsageStore: ObservableObject {
     private var displayTimer: Timer?
     private var lastRefresh = Date.distantPast
     private var logDirProvider: () -> URL?
+    /// Re-parses only the files that changed since the last refresh (keyed by mtime+size),
+    /// so an active session's constant FSEvents bursts don't re-read the whole history.
+    private let recordCache = RecordCache()
 
     init(logDir: @escaping () -> URL?) {
         self.logDirProvider = logDir
@@ -152,20 +158,25 @@ final class UsageStore: ObservableObject {
         if isRefreshing { return }
         isRefreshing = true
         let cap = effectiveCap
+        let cache = recordCache
+        let forceBedrock = Config.useBedrock
         Task.detached(priority: .utility) {
             let files = LogReader.findJSONL(in: dir)
-            let (records, malformed) = LogReader.readRecords(from: files)
+            let (records, malformed) = cache.records(for: files)
             let agg = aggregate(records,
                                 options: AggregateOptions(cap: cap),
                                 costModel: Pricing())
             let live = LiveReader.read(logDir: dir)   // opt-in cache; nil when no sidecar runs
             await MainActor.run {
                 let now = Date()
-                let mode: Mode = agg.dominantSurface == .subscription ? .subscription : .burn
+                // CLAUDE_CODE_USE_BEDROCK forces burn mode: Bedrock logs bare claude-* ids
+                // that otherwise read as a subscription, so the flag is the only honest signal.
+                let mode: Mode = (forceBedrock || agg.dominantSurface != .subscription) ? .burn : .subscription
                 let health = Self.health(for: agg, live: live, now: now, mode: mode)
                 self.snapshot = Snapshot(agg: agg, mode: mode, health: health,
                                          fileCount: files.count, malformed: malformed,
-                                         lastUpdated: now, cap: cap, live: live)
+                                         lastUpdated: now, cap: cap, live: live,
+                                         forceBedrock: forceBedrock)
                 // Learn the cap from a fresh live reading (cap ≈ tokens / sessionPct) so a real
                 // % survives once live goes stale. Takes effect on the next refresh's cap.
                 if let l = live, l.isFresh(now: now), let p = l.sessionPct,

@@ -32,6 +32,28 @@ because the app has no way to send them anywhere.
   (Max/Pro), or **AWS Bedrock**. The token counts are in the local logs either way,
   so no AWS credentials are needed to read them.
 
+## What runs where
+
+One idea — *read the logs, aggregate, show usage* — implemented as **two engines** (a
+pure JS one and a Swift port, kept in parity) behind **three front-ends**. Only one piece
+ever touches the network, and only because you start it:
+
+| Piece | What it is | You run it via | Network? |
+|---|---|---|---|
+| `src/` **JS engine** | parse + dedup + aggregate (`core.mjs`, `token-tab.mjs`, `pricing.mjs`) | the two front-ends below | no |
+| **CLI** | `node src/token-tab.mjs` → a terminal report | Terminal | no |
+| **SwiftBar** | shell wrappers run the JS engine every 30s/2m | the SwiftBar app | no¹ |
+| **Native app** | `app/Token Tab.app`, the menu-bar UI (Swift port in `app/Sources/TokenTabCore`) | you launch it; **App-Sandboxed** | **no — kernel-enforced** |
+| **Live sidecar** | `adapters/write-live.mjs` runs `claude /usage`, writes a cache file | **you** (Terminal, or the LaunchAgent) | **yes — via `claude`** |
+| `claude` CLI | the only thing that knows the real server-side `%` | spawned by the sidecar / SwiftBar-live | yes |
+
+¹ the `…-live.2m.sh` variant calls `claude`. The default `…30s.sh` does not.
+
+**The rule that makes it click:** the **native app never touches the network** — it can't,
+the sandbox forbids it. The live `%` reaches it only because the **sidecar you scheduled**
+writes a small cache file (`<logDir>/.token-tab-live.json`) that the app then *reads*. See
+"The live server %" → "Turn on live" below.
+
 ## The trust model (the whole point)
 
 Honest claims, each verifiable:
@@ -148,9 +170,17 @@ rates are visible and editable in one short file; that's the trade.
   (SwiftBar's minimal PATH usually needs this).
 - `TOKENTAB_LIVE_DEBUG`: when set, prints the reason live data was unavailable to stderr
   (diagnostic only; never stored).
+- `CLAUDE_CODE_USE_BEDROCK`: Claude Code's own Bedrock flag — when truthy
+  (`1`/`true`/`yes`/`on`), the app shows the **Bedrock / pay-per-token** panel instead of
+  the subscription runway. On Bedrock, Claude Code logs bare `claude-*` model ids that are
+  indistinguishable from a subscription, so the mode can't be inferred from the logs; this
+  flag (the same one that put Claude Code on Bedrock) is the signal. If it's already exported
+  in your shell, the native app — sandboxed and launched from Finder — won't see it, so drop
+  it in the env file below too.
 - Set any of these as env vars, **or** in a local `KEY=VALUE` file kept out of the repo:
-  `~/.config/token-tab/env` (or `~/.token-tab.env`). Only `TOKENTAB_*` keys are read;
-  real env vars take precedence. This is where your cap lives so it never gets committed.
+  `~/.config/token-tab/env` (or `~/.token-tab.env`). Only `TOKENTAB_*` keys (plus
+  `CLAUDE_CODE_USE_BEDROCK`) are read; real env vars take precedence. This is where your cap
+  lives so it never gets committed.
 - Default log dir: `~/.claude/projects`.
 
 ## The usage window (subscription)
@@ -192,11 +222,17 @@ the network call, and Token Tab only parses the printed summary (zero token cost
   separate, user-launched process and writes the parsed `%` to `<logDir>/.token-tab-live.json`;
   the sandboxed app reads that file as plain data (it's inside the folder you already granted,
   and both log walkers ignore it — hidden + not `*.jsonl`). The "cannot phone home" guarantee
-  stays fully enforced; the network lives entirely in the sidecar you scheduled. Run it on a
-  timer:
+  stays fully enforced; the network lives entirely in the sidecar you scheduled.
 
-      node adapters/write-live.mjs            # one-off
-      # or every ~2 min via launchd / cron / a SwiftBar wrapper
+  **Turn on live** (the blessed one-command path):
+
+      adapters/install-live.sh                # loads a LaunchAgent, refreshes every 5 min
+      adapters/install-live.sh uninstall      # stop + remove it
+      node adapters/write-live.mjs            # or just a one-off, no scheduler
+
+  The app shows the live status in its footer ("Live · 2m ago" / "off") and, when off,
+  surfaces these exact commands with a copy button — it can't run them for you (sandbox),
+  so it hands them to you.
 
   When a fresh reading is present the app headlines `91% left · live` and **learns your cap**
   from it (cap ≈ window tokens ÷ session `%`), persisting it so a real `%` keeps showing after
