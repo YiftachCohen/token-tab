@@ -36,6 +36,9 @@ struct DropdownView: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var access: AccessManager
     @Environment(\.colorScheme) private var scheme
+    /// Settings (cap + live) live behind the gear so they're reachable in EVERY mode — the
+    /// burn/API/Bedrock panel has no quota gauge to host them inline.
+    @State private var showSettings = false
 
     var body: some View {
         Group {
@@ -64,11 +67,15 @@ struct DropdownView: View {
     private var content: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             VStack(spacing: 0) {
-                switch store.snapshot.mode {
-                case .subscription:
-                    SubscriptionPanel(snapshot: store.snapshot, now: ctx.date)
-                case .burn:
-                    BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric)
+                if showSettings {
+                    SettingsView(store: store, now: ctx.date) { showSettings = false }
+                } else {
+                    switch store.snapshot.mode {
+                    case .subscription:
+                        SubscriptionPanel(store: store, now: ctx.date)
+                    case .burn:
+                        BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric)
+                    }
                 }
                 actionRow
             }
@@ -81,6 +88,9 @@ struct DropdownView: View {
                                      : "loading…")
                 .font(.system(size: 10)).foregroundStyle(Theme.faint)
             Spacer()
+            Button { showSettings.toggle() } label: {
+                Image(systemName: "gearshape").font(.system(size: 10, weight: .semibold))
+            }.buttonStyle(.plain).foregroundStyle(showSettings ? Theme.green : Theme.muted)
             Button { store.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .semibold))
             }.buttonStyle(.plain).foregroundStyle(Theme.muted)

@@ -1,0 +1,32 @@
+#:schema https://conductor.build/schemas/settings.repo.schema.json
+
+# Token Tab — shared Conductor config.
+#
+# Hybrid repo:
+#   • src/  — a zero-dependency Node.js engine (runs on system `node`; nothing to install).
+#   • app/  — a native SwiftUI menu-bar app (SwiftPM, no external dependencies).
+# The native menu-bar app is the primary dev loop (see app/README.md → "Run it").
+
+[scripts]
+# The JS engine has no dependencies (package.json -> "dependencies": {}), so there is
+# nothing to `npm install`. Pre-build the Swift package instead: it warms the gitignored
+# app/.build cache (absent in a fresh worktree) so the first Run is instant, and it
+# verifies the Swift toolchain in the new workspace up front.
+setup = "cd app && swift build"
+
+# Launch the menu-bar app live against your real ~/.claude logs (the README's fast,
+# unsandboxed dev path). It's a long-running MenuBarExtra agent, so it fits the Run button.
+# First kill any stale instance from a previous Run of THIS workspace (scoped to its build
+# dir) so re-running doesn't leave two identical menu-bar items behind.
+run = "pkill -f \"$CONDUCTOR_WORKSPACE_PATH/app/.build\" || true; cd app && swift run"
+
+# A menu-bar GUI app with no network server: there's no CONDUCTOR_PORT to separate
+# instances, and the menu bar itself is the shared surface. Run one workspace's app at
+# a time so multiple identical menu-bar items don't pile up indistinguishably.
+run_mode = "nonconcurrent"
+
+# On archive, stop only the menu-bar app launched from THIS workspace's build directory.
+# `swift run` may leave the spawned app running after the Run process is signaled; the
+# pattern is scoped to the workspace path, so it never touches another workspace or an
+# installed copy. `|| true` keeps archive from failing when nothing is running.
+archive = "pkill -f \"$CONDUCTOR_WORKSPACE_PATH/app/.build\" || true"
