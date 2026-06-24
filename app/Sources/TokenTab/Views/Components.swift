@@ -112,6 +112,86 @@ struct SegmentedToggle: View {
     }
 }
 
+/// Which tab the dropdown is showing — the design's "Overview | History" switcher.
+enum PanelTab: Hashable { case overview, history }
+
+/// The "Overview | History" tab switcher under the header. A raised white chip marks the
+/// active tab (design's `--tabOn`), distinct from the green-fill segmented controls below.
+struct PanelTabBar: View {
+    @Binding var selection: PanelTab
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(spacing: 2) {
+            tab("Overview", .overview)
+            tab("History", .history)
+        }
+        .padding(2)
+        .background(Theme.pill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func tab(_ title: String, _ value: PanelTab) -> some View {
+        let on = selection == value
+        return Text(title)
+            .font(.system(size: 11.5, weight: on ? .semibold : .medium))
+            .foregroundStyle(on ? Theme.ink : Theme.muted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(on ? Theme.tabOn(scheme) : .clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .shadow(color: on ? Color.black.opacity(0.10) : .clear, radius: 1.5, y: 1)
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeOut(duration: 0.12)) { selection = value } }
+    }
+}
+
+/// A compact green-fill segmented control (design's `segOn`/`segOff`) — the History tab's
+/// "$ / Tok" metric and "7d / 14d / 30d" range pickers. The selected segment fills green
+/// with dark-on-green text; the rest are muted on a faint pill track.
+struct MiniSegmented<T: Hashable>: View {
+    var options: [(label: String, value: T)]
+    @Binding var selection: T
+    var hPadding: CGFloat = 10
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options.indices, id: \.self) { i in
+                seg(options[i].label, options[i].value)
+            }
+        }
+        .padding(2)
+        .background(Theme.pill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func seg(_ label: String, _ value: T) -> some View {
+        let on = selection == value
+        return Text(label)
+            .font(.system(size: 10.5, weight: on ? .semibold : .medium))
+            .foregroundStyle(on ? Theme.onAccent : Theme.muted)
+            .padding(.vertical, 3).padding(.horizontal, hPadding)
+            .background(on ? Theme.green : .clear,
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture { selection = value }
+    }
+}
+
+/// The History "↑ 28% vs prev" / "↓ 9% vs prev" badge. Up is amber (spending more), down is
+/// green (spending less) — matching the design's `deltaStyle`.
+struct DeltaBadge: View {
+    var deltaPct: Int
+    private var up: Bool { deltaPct > 0 }
+    private var tint: Color { up ? Theme.amber : Theme.green }
+
+    var body: some View {
+        Text("\(up ? "↑" : "↓") \(abs(deltaPct))% vs prev")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.vertical, 3).padding(.horizontal, 8)
+            .background(tint.opacity(0.16), in: Capsule())
+    }
+}
+
 /// A capsule "pill" badge like CLAUDE MAX / BEDROCK in the header.
 struct Pill: View {
     var text: String

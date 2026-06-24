@@ -39,6 +39,9 @@ struct DropdownView: View {
     /// Settings (cap + live) live behind the gear so they're reachable in EVERY mode — the
     /// burn/API/Bedrock panel has no quota gauge to host them inline.
     @State private var showSettings = false
+    /// Overview ↔ History, the design's tab switcher. Shared across both modes; the header
+    /// and footer sit outside it so only the body swaps.
+    @State private var tab: PanelTab = .overview
 
     var body: some View {
         Group {
@@ -70,15 +73,48 @@ struct DropdownView: View {
                 if showSettings {
                     SettingsView(store: store, now: ctx.date) { showSettings = false }
                 } else {
-                    switch store.snapshot.mode {
-                    case .subscription:
-                        SubscriptionPanel(store: store, now: ctx.date)
-                    case .burn:
-                        BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric)
-                    }
+                    // Shared header + tabs; only the body below the switcher swaps.
+                    PanelHeader(pill: headerPill(now: ctx.date))
+                    PanelTabBar(selection: $tab)
+                        .padding(.horizontal, 17).padding(.top, 12)
+                    tabBody(now: ctx.date)
                 }
                 actionRow
             }
+        }
+    }
+
+    /// The active tab's body — the mode-specific Overview panel, or the History chart.
+    @ViewBuilder private func tabBody(now: Date) -> some View {
+        switch tab {
+        case .overview:
+            switch store.snapshot.mode {
+            case .subscription: SubscriptionPanel(store: store, now: now)
+            case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric)
+            }
+        case .history:
+            HistoryPanel(snapshot: store.snapshot, mode: store.snapshot.mode)
+        }
+    }
+
+    /// The header badge, hoisted out of the panels so it's shared across tabs: a pulsing LIVE
+    /// dot + CLAUDE MAX on a subscription (the dot means "this % is authoritative"), or the
+    /// BEDROCK/API pill on pay-per-token.
+    @ViewBuilder private func headerPill(now: Date) -> some View {
+        switch store.snapshot.mode {
+        case .subscription:
+            HStack(spacing: 7) {
+                if store.snapshot.quotaLeft(now: now)?.source == "live" {
+                    HStack(spacing: 4) {
+                        GlowDot(color: Theme.green, size: 5, glow: 3)
+                        Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)
+                            .foregroundStyle(Theme.green)
+                    }
+                }
+                Pill(text: "CLAUDE MAX", tint: Theme.green)
+            }
+        case .burn:
+            Pill(text: store.snapshot.surface == .bedrock ? "BEDROCK" : "API", tint: Theme.amber)
         }
     }
 

@@ -14,6 +14,11 @@ enum Theme {
     static let indigo = dynamic(light: 0x5B62D6, dark: 0x7C83F0)   // Codex
     static let amber  = dynamic(light: 0xB06A1F, dark: 0xD6A45A)
     static let red    = dynamic(light: 0xD65745, dark: 0xE06A55)
+    /// The History chart's "today" bar — a lighter, more legible amber than the text `amber`
+    /// (design's `--amberBar`). Also the busiest-model accent when Opus leads on cost.
+    static let amberBar = dynamic(light: 0xC08A3E, dark: 0xD6A45A)
+    /// Slate (design's `--weekly`) — the Haiku / weekly accent in the breakdowns.
+    static let slate    = dynamic(light: 0x7D8AA3, dark: 0x6F87B5)
 
     // Text ramp — warm greys in light (subscription mock), cool blue-greys in dark (Bedrock mock).
     static let ink   = dynamic(light: 0x1C1D22, dark: 0xEEF0F4)
@@ -25,6 +30,14 @@ enum Theme {
     static let track      = Color.primary.opacity(0.08)
     static let subtleFill = Color.primary.opacity(0.05)
     static let hairline   = Color.primary.opacity(0.10)
+    /// The track behind a segmented/tab control (design's `--pill`).
+    static let pill       = Color.primary.opacity(0.06)
+
+    /// A selected tab's raised chip — opaque white in light, a faint white in dark
+    /// (design's `--tabOn`). Distinct from the green-fill segmented controls.
+    static func tabOn(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color.white.opacity(0.12) : Color.white
+    }
 
     /// The panel's inner edge highlight — a bright thin line in light, a faint white in dark.
     static func panelStroke(_ scheme: ColorScheme) -> Color {

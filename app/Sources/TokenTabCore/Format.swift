@@ -56,6 +56,24 @@ public enum Fmt {
         return "$" + String(format: "%.2f", n)
     }
 
+    /// A model id → a short display name for the History "busiest model" line:
+    /// "claude-opus-4-1-20250514" → "Opus 4.1", "claude-sonnet-4-5" → "Sonnet 4.5",
+    /// "us.anthropic.claude-haiku-4-5-v1:0" → "Haiku 4.5", "sonnet" → "Sonnet". Unknown
+    /// ids fall back to a title-cased form so nothing renders as a raw slug.
+    public static func modelName(_ model: String) -> String {
+        // Canonicalise first (strips [1m], region/vendor prefixes, the -vN:M and trailing
+        // -YYYYMMDD date) so a date never leaks into the parsed version number.
+        let id = Pricing.canonicalModelId(model)
+        let version = id.split(whereSeparator: { !$0.isNumber }).joined(separator: ".")
+        if let fam = ["opus", "sonnet", "haiku", "fable"].first(where: { id.contains($0) }) {
+            return version.isEmpty ? fam.capitalized : "\(fam.capitalized) \(version)"
+        }
+        let pretty = id.split(whereSeparator: { "-_.".contains($0) })
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+        return pretty.isEmpty ? model : pretty
+    }
+
     /// Reset clock time like the design's "resets 11:33" (local time, 24h or 12h per locale).
     public static func clock(_ date: Date?) -> String {
         guard let date else { return "—" }
