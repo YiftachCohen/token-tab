@@ -98,6 +98,11 @@ final class UsageStore: ObservableObject {
     private var watcher: FolderWatcher?
     private var displayTimer: Timer?
     private var lastRefresh = Date.distantPast
+    /// Set when a refresh is requested while one is already in flight. The
+    /// completing refresh re-runs once if this is set, so the final write of a
+    /// burst is never dropped (the old guard silently discarded it, leaving
+    /// counts stale until the 90s safety tick).
+    private var pendingRefresh = false
     private var logDirProvider: () -> URL?
     /// Re-parses only the files that changed since the last refresh (keyed by mtime+size),
     /// so an active session's constant FSEvents bursts don't re-read the whole history.
@@ -156,8 +161,9 @@ final class UsageStore: ObservableObject {
 
     func refresh() {
         guard let dir = logDirProvider() else { return }
-        if isRefreshing { return }
+        if isRefreshing { pendingRefresh = true; return }
         isRefreshing = true
+        pendingRefresh = false
         let cap = effectiveCap
         let cache = recordCache
         let forceBedrock = Config.useBedrock
@@ -191,6 +197,12 @@ final class UsageStore: ObservableObject {
                 self.hasLoadedOnce = true
                 self.lastRefresh = now
                 self.clock = now
+                // A change landed while we were reading — run exactly once more to
+                // pick it up (further bursts are coalesced by the watcher's debounce).
+                if self.pendingRefresh {
+                    self.pendingRefresh = false
+                    self.refresh()
+                }
             }
         }
     }
