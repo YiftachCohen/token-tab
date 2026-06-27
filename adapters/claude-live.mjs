@@ -17,7 +17,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { parseUsageOutput } from "../src/live-parse.mjs";
 
 // SwiftBar runs plugins with a minimal PATH (the wrapper already hardcodes the
@@ -64,7 +64,13 @@ export async function readLiveUsage({ timeoutMs = 5000 } = {}) {
       child = execFile(
         bin,
         ["-p", "/usage", "--output-format", "json"],
-        { timeout: timeoutMs, killSignal: "SIGTERM", maxBuffer: 256 * 1024, windowsHide: true },
+        // Run claude in a neutral temp dir, NOT the inherited cwd. `claude -p` still
+        // boots a session rooted at its working directory and indexes it; under the
+        // LaunchAgent that cwd is $HOME, so it walks into ~/Desktop / ~/Documents /
+        // ~/Downloads and trips macOS's TCC consent prompts (attributed to the parent
+        // "node"). /usage reads the server quota, never local files, so an empty
+        // tmpdir gives it nothing to scan and the prompts never fire.
+        { cwd: tmpdir(), timeout: timeoutMs, killSignal: "SIGTERM", maxBuffer: 256 * 1024, windowsHide: true },
         (err, stdout) => {
           if (err) return done(null, `spawn failed: ${err.code || err.message}`);
           const parsed = parseUsageOutput(stdout);
