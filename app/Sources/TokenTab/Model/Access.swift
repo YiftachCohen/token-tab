@@ -51,6 +51,15 @@ final class AccessManager: ObservableObject {
         state = .needsGrant(target)
     }
 
+    /// Release the currently held security-scoped resource before acquiring a
+    /// new scope. macOS holds a finite number of sandbox extensions per process;
+    /// re-granting without releasing the old one leaks one each time. The launch
+    /// scope is intentionally held for the app's lifetime (reclaimed at exit).
+    private func releaseScope() {
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = nil
+    }
+
     private func resolveSavedBookmark() -> URL? {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return nil }
         var stale = false
@@ -59,6 +68,7 @@ final class AccessManager: ObservableObject {
                                  relativeTo: nil,
                                  bookmarkDataIsStale: &stale) else { return nil }
         if stale { UserDefaults.standard.removeObject(forKey: defaultsKey); return nil }
+        releaseScope() // self-consistent: never stack a second scope on an existing one
         guard url.startAccessingSecurityScopedResource() else { return nil }
         scopedURL = url
         return url
@@ -78,6 +88,7 @@ final class AccessManager: ObservableObject {
         panel.directoryURL = FileManager.default.fileExists(atPath: claude.path) ? claude : FileManager.default.homeDirectoryForCurrentUser
 
         guard panel.runModal() == .OK, let chosen = panel.url else { return }
+        releaseScope() // drop any previously held scope before acquiring the new one
         if let data = try? chosen.bookmarkData(options: [.withSecurityScope],
                                                includingResourceValuesForKeys: nil,
                                                relativeTo: nil) {
