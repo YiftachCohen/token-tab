@@ -79,6 +79,9 @@ test("surface routing", () => {
   assert.equal(classifySurface("sonnet"), "subscription");
   assert.equal(classifySurface("us.anthropic.claude-3-5-sonnet-20241022-v2:0"), "bedrock");
   assert.equal(classifySurface("anthropic.claude-3-haiku-20240307-v1:0"), "bedrock");
+  assert.equal(classifySurface("eu.anthropic.claude-sonnet-4-20250514-v1:0"), "bedrock");
+  assert.equal(classifySurface("apac.anthropic.claude-opus-4-1-20250101-v1:0"), "bedrock");
+  assert.equal(classifySurface("us-gov.anthropic.claude-3-5-haiku-20241022-v1:0"), "bedrock");
   assert.equal(classifySurface("<synthetic>"), "untracked");
   assert.equal(classifySurface("gpt-5.5"), "untracked");
 });

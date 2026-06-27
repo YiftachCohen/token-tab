@@ -43,7 +43,11 @@ export function normalizeModel(model) {
 export function classifySurface(model) {
   const { base } = normalizeModel(model);
   if (!base || base === "<synthetic>" || base === "<unknown>") return "untracked";
-  if (base.startsWith("us.anthropic.") || base.startsWith("anthropic.")) return "bedrock";
+  // Bedrock ids carry an optional region prefix (us./eu./apac./us-gov.) before
+  // `anthropic.`; strip it so every region routes to bedrock — matching the
+  // region set canonicalModelId strips in pricing.mjs (kept in lockstep).
+  const deregioned = base.replace(/^(us|eu|apac|us-gov)\./, "");
+  if (deregioned.startsWith("anthropic.")) return "bedrock";
   if (base.startsWith("claude-") || /^(sonnet|opus|haiku)$/i.test(base)) return "subscription";
   return "untracked";
 }

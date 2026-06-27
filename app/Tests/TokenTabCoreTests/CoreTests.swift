@@ -73,6 +73,9 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(ModelUtil.classifySurface("sonnet"), .subscription)
         XCTAssertEqual(ModelUtil.classifySurface("us.anthropic.claude-3-5-sonnet-20241022-v2:0"), .bedrock)
         XCTAssertEqual(ModelUtil.classifySurface("anthropic.claude-3-haiku-20240307-v1:0"), .bedrock)
+        XCTAssertEqual(ModelUtil.classifySurface("eu.anthropic.claude-sonnet-4-20250514-v1:0"), .bedrock)
+        XCTAssertEqual(ModelUtil.classifySurface("apac.anthropic.claude-opus-4-1-20250101-v1:0"), .bedrock)
+        XCTAssertEqual(ModelUtil.classifySurface("us-gov.anthropic.claude-3-5-haiku-20241022-v1:0"), .bedrock)
         XCTAssertEqual(ModelUtil.classifySurface("<synthetic>"), .untracked)
         XCTAssertEqual(ModelUtil.classifySurface("gpt-5.5"), .untracked)
     }
