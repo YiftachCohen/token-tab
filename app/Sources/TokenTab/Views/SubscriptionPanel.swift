@@ -51,8 +51,6 @@ struct SubscriptionPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PanelHeader(pill: headerPill)
-
             // HERO: the gauge holds the single "left" figure — a real quota % when we have a
             // cap, otherwise the time remaining. Color carries health only when it's quota.
             HStack(alignment: .top, spacing: 18) {
@@ -262,21 +260,6 @@ struct SubscriptionPanel: View {
         guard let c = l.capturedAt else { return "just now" }
         let s = Int(now.timeIntervalSince(c))
         return s < 60 ? "\(max(0, s))s ago" : "\(s / 60)m ago"
-    }
-
-    /// Header badge: a pulsing LIVE dot when the % is from a fresh `claude /usage` reading,
-    /// then the plan pill. The dot is the at-a-glance "these numbers are authoritative" cue.
-    @ViewBuilder private var headerPill: some View {
-        HStack(spacing: 7) {
-            if isLive {
-                HStack(spacing: 4) {
-                    GlowDot(color: Theme.green, size: 5, glow: 3)
-                    Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)
-                        .foregroundStyle(Theme.green)
-                }
-            }
-            Pill(text: "CLAUDE MAX", tint: Theme.green)
-        }
     }
 
     private func barRow(title: String, trailing: String, fraction: Double, color: Color) -> some View {

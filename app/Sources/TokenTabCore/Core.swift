@@ -230,6 +230,28 @@ public struct Aggregate: Sendable {
     }
 }
 
+/// One local calendar day of usage — the unit the History view charts. Carries both
+/// tokens and (estimated) dollars plus a per-model breakdown, so the same buckets answer
+/// "$ vs tokens" and "busiest model" without a re-read.
+public struct DayUsage: Sendable {
+    public var date: Date                      // start of this local day
+    public var tokens: Int
+    public var cost: Double
+    public var weekend: Bool
+    public var tokensByModel: [String: Int]
+    public var costByModel: [String: Double]
+
+    public init(date: Date, tokens: Int = 0, cost: Double = 0, weekend: Bool = false,
+                tokensByModel: [String: Int] = [:], costByModel: [String: Double] = [:]) {
+        self.date = date
+        self.tokens = tokens
+        self.cost = cost
+        self.weekend = weekend
+        self.tokensByModel = tokensByModel
+        self.costByModel = costByModel
+    }
+}
+
 // MARK: - Pricing hook (so Core stays decoupled from the rate table)
 
 public protocol CostModel: Sendable {
@@ -419,4 +441,80 @@ public func aggregate(_ records: [UsageRecord],
         agg.cost = costSummary
     }
     return agg
+}
+
+// MARK: - dailyHistory()
+
+/// Bucket usage into a contiguous run of `days` local days ending today — the series the
+/// History view charts. Days with no usage are present as zero entries so the chart's day
+/// axis is continuous (a gap is an honest empty bar, not a missing column).
+///
+/// Dedup is the SAME keep-last rule as `aggregate()` (a streaming message's final line wins),
+/// reproduced here rather than shared so the audited aggregate path stays untouched. Records
+/// without a timestamp can't be placed on a day and are skipped; a future-dated line (clock
+/// skew) is upper-bounded out, exactly as the windowed totals are.
+public func dailyHistory(_ records: [UsageRecord],
+                         days: Int = 60,
+                         now: Date = Date(),
+                         costModel: CostModel? = nil) -> [DayUsage] {
+    guard days > 0 else { return [] }
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = .current
+    let nowMs = now.timeIntervalSince1970
+
+    // Pass 1 — dedup, keep-last, first-seen order (mirrors aggregate()).
+    var kept: [String: UsageRecord] = [:]
+    var order: [String] = []
+    var uniqueCounter = 0
+    for r in records {
+        let hasIds = (r.messageId?.isEmpty == false) && (r.requestId?.isEmpty == false)
+        let key: String
+        if hasIds {
+            key = "\(r.messageId!):\(r.requestId!)"
+        } else {
+            key = "__nokey__\(uniqueCounter)"
+            uniqueCounter += 1
+        }
+        if kept[key] == nil { order.append(key) }
+        kept[key] = r
+    }
+
+    // Pass 2 — sum into per-day buckets keyed by local day.
+    var tokensByDay: [Int: Int] = [:]
+    var costByDay: [Int: Double] = [:]
+    var tokModelByDay: [Int: [String: Int]] = [:]
+    var costModelByDay: [Int: [String: Double]] = [:]
+    for key in order {
+        guard let r = kept[key], let ts = r.timestamp else { continue }
+        let tms = ts.timeIntervalSince1970
+        if tms > nowMs { continue }                       // skip future-dated (clock skew)
+        let dk = localDayKey(ts, cal)
+        let sum = r.usage.sum
+        let base = ModelUtil.normalize(r.model).base
+        tokensByDay[dk, default: 0] += sum
+        tokModelByDay[dk, default: [:]][base, default: 0] += sum
+        if let cm = costModel {
+            let c = cm.cost(r.usage, model: r.model)
+            if c.priced {
+                costByDay[dk, default: 0] += c.usd
+                costModelByDay[dk, default: [:]][base, default: 0] += c.usd
+            }
+        }
+    }
+
+    // Pass 3 — emit `days` contiguous days ending today (oldest first), zero-filling gaps.
+    let todayStart = cal.startOfDay(for: now)
+    var out: [DayUsage] = []
+    out.reserveCapacity(days)
+    for offset in stride(from: days - 1, through: 0, by: -1) {
+        guard let dayStart = cal.date(byAdding: .day, value: -offset, to: todayStart) else { continue }
+        let dk = localDayKey(dayStart, cal)
+        out.append(DayUsage(date: dayStart,
+                            tokens: tokensByDay[dk] ?? 0,
+                            cost: costByDay[dk] ?? 0,
+                            weekend: cal.isDateInWeekend(dayStart),
+                            tokensByModel: tokModelByDay[dk] ?? [:],
+                            costByModel: costModelByDay[dk] ?? [:]))
+    }
+    return out
 }

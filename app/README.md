@@ -24,6 +24,17 @@ The headline auto-switches on the dominant surface detected from your model ids:
 The menu-bar glyph itself is the readability study's "Recommended" treatment: a
 monochrome number (always legible on any wallpaper) plus one colored health dot.
 
+## Overview & History
+
+The dropdown has two tabs under a shared header:
+
+- **Overview** — the mode-specific headline above (runway or burn).
+- **History** — a daily bar chart with a `7 / 14 / 30-day` range and a `$ / tokens` switch.
+  The period total, the **vs-previous-period** delta, the dashed daily-average line and the
+  **busiest model** all re-shape together (Opus leads on `$`, Sonnet on tokens). The metric
+  defaults to the mode's headline — tokens on a subscription, `$` on pay-per-token. It's
+  sliced from a precomputed 60-day series (`dailyHistory`), so toggling re-reads nothing.
+
 ## Run it
 
 **Fast dev path (unsandboxed, reads `~/.claude` directly):**
@@ -97,7 +108,7 @@ app/
   Sources/TokenTab/
     TokenTabApp.swift           @main MenuBarExtra agent (LSUIElement, no Dock icon)
     Model/                      LogReader, Access (security-scoped grant), UsageStore, Config, Probe
-    Views/                      Theme, Components, MenuBarLabel, SubscriptionPanel, BurnPanel, DropdownView
+    Views/                      Theme, Components, MenuBarLabel, SubscriptionPanel, BurnPanel, HistoryPanel, DropdownView
   Bundle/                       Info.plist (CFBundleIconFile) + TokenTab.entitlements (sandbox, no network)
   Branding/                     gauge logo sources (SVG) + generated favicons / wordmark / hero
   Scripts/build-app.sh          assemble + ad-hoc-sign the .app (regenerates the icon if missing)
