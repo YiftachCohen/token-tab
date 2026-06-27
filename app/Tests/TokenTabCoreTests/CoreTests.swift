@@ -186,7 +186,13 @@ final class CoreTests: XCTestCase {
         // opus-4-8: input 5, output 25, cacheWrite 6.25, cacheRead 0.5 (per 1M).
         let (usd, priced) = Pricing().cost(u(10, 20, 30, 5), model: "claude-opus-4-8")
         XCTAssertTrue(priced)
-        let expected: Double = (10.0 * 5 + 20.0 * 6.25 + 30.0 * 0.5 + 5.0 * 25) / 1_000_000
+        // Split into sub-expressions so the type-checker doesn't time out on the
+        // mixed Int/Double literal arithmetic (Swift 6.1.x).
+        let input: Double = 10.0 * 5.0
+        let cacheWrite: Double = 20.0 * 6.25
+        let cacheRead: Double = 30.0 * 0.5
+        let output: Double = 5.0 * 25.0
+        let expected: Double = (input + cacheWrite + cacheRead + output) / 1_000_000.0
         XCTAssertEqual(usd, expected, accuracy: 1e-12)
     }
 
