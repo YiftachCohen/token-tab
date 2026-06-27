@@ -22,3 +22,11 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: node --test
+
+  swift:
+    name: swift parity (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift test --package-path app
