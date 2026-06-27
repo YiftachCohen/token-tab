@@ -77,7 +77,14 @@ public enum ModelUtil {
     public static func classifySurface(_ model: String) -> Surface {
         let base = normalize(model).base
         if base.isEmpty || base == "<synthetic>" || base == "<unknown>" { return .untracked }
-        if base.hasPrefix("us.anthropic.") || base.hasPrefix("anthropic.") { return .bedrock }
+        // Bedrock ids carry an optional region prefix (us./eu./apac./us-gov.) before
+        // `anthropic.`; strip it so every region routes to bedrock — matching the region
+        // set canonicalModelId strips in Pricing.swift (kept in lockstep).
+        var deregioned = base
+        for prefix in ["us.", "eu.", "apac.", "us-gov."] where deregioned.hasPrefix(prefix) {
+            deregioned = String(deregioned.dropFirst(prefix.count)); break
+        }
+        if deregioned.hasPrefix("anthropic.") { return .bedrock }
         let lower = base.lowercased()
         if base.hasPrefix("claude-") || lower == "sonnet" || lower == "opus" || lower == "haiku" {
             return .subscription
