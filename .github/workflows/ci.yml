@@ -46,3 +46,11 @@ jobs:
           if [ -n "$deps" ]; then echo "::error::package.json declares runtime dependencies: $deps"; fail=1; fi
           if [ "$fail" -ne 0 ]; then echo "Trust invariant violated — see errors above."; fi
           exit $fail
+
+  swift:
+    name: swift parity (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift test --package-path app
