@@ -35,7 +35,6 @@ struct PanelHeader<P: View>: View {
 struct DropdownView: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var access: AccessManager
-    @Environment(\.colorScheme) private var scheme
     /// Settings (cap + live) live behind the gear so they're reachable in EVERY mode — the
     /// burn/API/Bedrock panel has no quota gauge to host them inline.
     @State private var showSettings = false
@@ -56,12 +55,12 @@ struct DropdownView: View {
             }
         }
         .frame(width: 322)
-        .background(.ultraThickMaterial)
+        // Glass. The dial, opaque→sheer: ultraThick → thick → regular → thin → ultraThin. The old
+        // default was ultraThick (most opaque); `thin` reads markedly more translucent, and the
+        // now-brighter muted text keeps content legible. No edge stroke — the material's own edge
+        // and the window's shadow define the panel.
+        .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Theme.panelStroke(scheme), lineWidth: 0.75)
-        )
     }
 
     private var content: some View {
@@ -101,17 +100,7 @@ struct DropdownView: View {
         .background(Theme.subtleFill)
     }
 
-    private var loading: some View {
-        TimelineView(.animation) { ctx in
-            let angle = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360
-            VStack(spacing: 10) {
-                BrandMark(size: 26, lineWidth: 3, fraction: 0.3, color: Theme.green)
-                    .rotationEffect(.degrees(angle))
-                Text("Reading ~/.claude…").font(.system(size: 12)).foregroundStyle(Theme.muted)
-            }
-            .frame(maxWidth: .infinity).padding(.vertical, 46)
-        }
-    }
+    private var loading: some View { LoadingView() }
 
     private func updatedAgo(_ date: Date) -> String {
         let s = Int(Date().timeIntervalSince(date))
