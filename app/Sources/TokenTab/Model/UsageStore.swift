@@ -80,6 +80,16 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    /// Persisted: the user's explicit display-mode choice from Settings. nil = auto-detect.
+    /// This is the sandbox-clean override (UserDefaults), since the app can't read the
+    /// env file under its read-only grant. Empty string in defaults means "auto".
+    @Published var surfaceModeOverride: Surface? {
+        didSet {
+            UserDefaults.standard.set(surfaceModeOverride?.rawValue ?? "", forKey: "surfaceMode")
+            refresh()
+        }
+    }
+
     /// Persisted: the cap LEARNED from a live reading (cap ≈ window tokens / sessionPct). Set
     /// only during refresh, never typed by the user. Persisting it is what lets the gauge keep
     /// showing a real % after the live reading goes stale or the sidecar stops.
@@ -114,6 +124,8 @@ final class UsageStore: ObservableObject {
         self.menuMetric = MenuMetric(rawValue: raw) ?? .cost
         self.capOverride = UserDefaults.standard.integer(forKey: "windowCap")        // 0 when unset
         self.calibratedCap = UserDefaults.standard.integer(forKey: "calibratedCap")  // 0 when unset
+        let modeRaw = UserDefaults.standard.string(forKey: "surfaceMode") ?? ""
+        self.surfaceModeOverride = Surface(rawValue: modeRaw)   // nil for "" / unknown → auto
     }
 
     func start() {
@@ -167,6 +179,7 @@ final class UsageStore: ObservableObject {
         let cap = effectiveCap
         let cache = recordCache
         let forceBedrock = Config.useBedrock
+        let inAppOverride = surfaceModeOverride   // @MainActor state, captured before detaching
         Task.detached(priority: .utility) {
             let files = LogReader.findJSONL(in: dir)
             let (records, malformed) = cache.records(for: files)
@@ -177,10 +190,14 @@ final class UsageStore: ObservableObject {
             let override = Config.surfaceOverride
             await MainActor.run {
                 let now = Date()
-                // Surface precedence: an explicit TOKENTAB_MODE wins; else CLAUDE_CODE_USE_BEDROCK
-                // forces Bedrock (logs bare claude-* ids otherwise read as a subscription); else
-                // the dominant model-id surface. mode follows: anything non-subscription is burn.
-                let surface = override ?? (forceBedrock ? .bedrock : agg.dominantSurface)
+                // Surface precedence: an in-app choice wins (the only sandbox-reachable override);
+                // else an explicit TOKENTAB_MODE; else CLAUDE_CODE_USE_BEDROCK forces Bedrock (logs
+                // bare claude-* ids otherwise read as a subscription); else the dominant model-id
+                // surface. mode follows: anything non-subscription is burn.
+                let surface = resolveSurface(inApp: inAppOverride,
+                                             envOverride: override,
+                                             forceBedrock: forceBedrock,
+                                             dominant: agg.dominantSurface)
                 let mode: Mode = surface == .subscription ? .subscription : .burn
                 let health = Self.health(for: agg, live: live, now: now, mode: mode)
                 self.snapshot = Snapshot(agg: agg, mode: mode, surface: surface, health: health,

@@ -104,3 +104,42 @@ test("window cap from a local config file (TOKENTAB_CONFIG) -> dropdown shows a 
     rmSync(cfg, { force: true });
   }
 });
+
+test("TOKENTAB_MODE=bedrock suppresses the subscription 5h-window panel (swiftbar)", async () => {
+  const dir = makeFixtureDir(); // fixture is subscription-dominant (claude-opus-4-8)
+  try {
+    const env = { ...process.env, TOKENTAB_LOG_DIR: dir, TOKENTAB_MODE: "bedrock" };
+    const { stdout } = await run("node", [CLI, "--swiftbar"], { env });
+    assert.ok(!stdout.includes("5h window:"), "no subscription window for a bedrock surface");
+    assert.match(stdout, /Today: .* tokens/);
+    assert.match(stdout, /Local only · No network/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("TOKENTAB_MODE=bedrock labels the report surface as a mode override", async () => {
+  const dir = makeFixtureDir();
+  try {
+    const env = { ...process.env, TOKENTAB_LOG_DIR: dir, TOKENTAB_MODE: "bedrock" };
+    const { stdout } = await run("node", [CLI], { env });
+    assert.match(stdout, /Surface: bedrock \(mode override\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLAUDE_CODE_USE_BEDROCK=1 from the env file forces Bedrock", async () => {
+  const dir = makeFixtureDir();
+  const cfg = join(tmpdir(), `tt-cfg-${process.pid}-${Math.floor(performance.now())}.env`);
+  writeFileSync(cfg, "CLAUDE_CODE_USE_BEDROCK=1\n");
+  try {
+    const env = { ...process.env, TOKENTAB_LOG_DIR: dir, TOKENTAB_CONFIG: cfg };
+    delete env.CLAUDE_CODE_USE_BEDROCK; // prove the value comes from the file, not the env
+    const { stdout } = await run("node", [CLI], { env });
+    assert.match(stdout, /Surface: bedrock/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cfg, { force: true });
+  }
+});
