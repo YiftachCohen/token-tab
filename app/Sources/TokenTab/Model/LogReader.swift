@@ -24,12 +24,15 @@ enum LogReader {
     }
 
     /// All *.jsonl under `dir`, oldest mtime first so first-seen dedup is reproducible
-    /// (matches findJsonl in the JS shell). Tolerates files vanishing mid-walk.
+    /// (matches findJsonl in the JS shell — which recurses into ALL directories, including
+    /// hidden ones, so we must NOT skip hidden paths or the two engines' input sets diverge).
+    /// The `.jsonl` filter still excludes the hidden live-cache file (.token-tab-live.json,
+    /// extension `json`). Tolerates files vanishing mid-walk.
     static func findJSONL(in dir: URL) -> [URL] {
         let fm = FileManager.default
         guard let en = fm.enumerator(at: dir,
                                      includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-                                     options: [.skipsHiddenFiles]) else { return [] }
+                                     options: []) else { return [] }
         var out: [(url: URL, mtime: Date)] = []
         for case let url as URL in en where url.pathExtension == "jsonl" {
             let vals = try? url.resourceValues(forKeys: [.contentModificationDateKey])
