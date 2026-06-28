@@ -1,0 +1,23 @@
+{
+  "name": "record stamped exactly at now -> today/week/5h all count it (TZ-independent)",
+  "now": "2026-06-20T18:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "n1", "requestId": "nr1", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 500, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T18:00:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 500,
+    "today": 500,
+    "thisWeek": 500,
+    "rolling5h": 500,
+    "byClass": { "input": 500, "cacheCreate": 0, "cacheRead": 0, "output": 0 },
+    "bySurface": { "subscription": 500, "bedrock": 0, "untracked": 0 },
+    "byModel": { "claude-opus-4-8": 500 },
+    "window": { "active": true, "tokens": 500, "calibratedCap": 0, "resetMs": 1781996400000, "pct": null },
+    "cost": { "total": 0.0025, "today": 0.0025, "byModel": { "claude-opus-4-8": 0.0025 }, "unpricedTokens": 0 }
+  }
+}

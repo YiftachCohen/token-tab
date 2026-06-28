@@ -1,0 +1,47 @@
+{
+  "name": "keep-last dedup + multi-surface + cost (future-dated, so windows stay idle)",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "m1", "requestId": "r1", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 5, "cache_creation_input_tokens": 1000, "cache_read_input_tokens": 30000, "output_tokens": 100 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "m1", "requestId": "r1", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 5, "cache_creation_input_tokens": 1000, "cache_read_input_tokens": 30000, "output_tokens": 200 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "m2", "requestId": "r2", "model": "us.anthropic.claude-opus-4-8-20251101-v1:0",
+      "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:05:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "m3", "requestId": "r3", "model": "totally-unknown-model",
+      "usage": { "input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 50 },
+      "timestamp": "2026-06-20T12:10:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 1031355,
+    "today": 0,
+    "thisWeek": 0,
+    "rolling5h": 0,
+    "byClass": { "input": 1000105, "cacheCreate": 1000, "cacheRead": 30000, "output": 250 },
+    "bySurface": { "subscription": 31205, "bedrock": 1000000, "untracked": 150 },
+    "byModel": {
+      "claude-opus-4-8": 31205,
+      "us.anthropic.claude-opus-4-8-20251101-v1:0": 1000000,
+      "totally-unknown-model": 150
+    },
+    "window": { "active": false, "tokens": 0, "calibratedCap": 0, "resetMs": null, "pct": null },
+    "cost": {
+      "total": 5.026275,
+      "today": 0,
+      "byModel": { "claude-opus-4-8": 0.026275, "us.anthropic.claude-opus-4-8-20251101-v1:0": 5 },
+      "unpricedTokens": 150
+    }
+  }
+}

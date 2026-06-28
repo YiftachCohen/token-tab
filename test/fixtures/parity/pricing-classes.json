@@ -1,0 +1,48 @@
+{
+  "name": "per-class pricing + [1m]/dated canonicalization (future-dated, so windows stay idle)",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "pa", "requestId": "ra", "model": "claude-opus-4-8[1m]",
+      "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "pb", "requestId": "rb", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 1000000, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "pc", "requestId": "rc", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000000, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "pd", "requestId": "rd", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "pe", "requestId": "re", "model": "claude-opus-4-8-20251101",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 5000000,
+    "today": 0,
+    "thisWeek": 0,
+    "rolling5h": 0,
+    "byClass": { "input": 1000000, "cacheCreate": 1000000, "cacheRead": 1000000, "output": 2000000 },
+    "bySurface": { "subscription": 5000000, "bedrock": 0, "untracked": 0 },
+    "byModel": { "claude-opus-4-8": 4000000, "claude-opus-4-8-20251101": 1000000 },
+    "window": { "active": false, "tokens": 0, "calibratedCap": 0, "resetMs": null, "pct": null },
+    "cost": {
+      "total": 61.75,
+      "today": 0,
+      "byModel": { "claude-opus-4-8": 36.75, "claude-opus-4-8-20251101": 25 },
+      "unpricedTokens": 0
+    }
+  }
+}
