@@ -32,14 +32,6 @@ struct SubscriptionPanel: View {
 
     /// The ring's fill: quota-left when we have it, else the time countdown.
     private var heroFraction: Double { hasQuota ? Double(quotaLeft ?? 0) / 100 : timeLeft }
-    /// The 5-hour bar's fill (used side): quota-used when we have a %, else time-elapsed.
-    private var barUsed: Double { hasQuota ? Double(100 - (quotaLeft ?? 100)) / 100 : (1 - timeLeft) }
-    private var barUsedPct: Int { max(0, min(100, Int((barUsed * 100).rounded()))) }
-    private var barTrailing: String {
-        if isLive { return "\(barUsedPct)% used · live" }
-        if hasQuota { return "\(barUsedPct)% of cap" }
-        return "\(barUsedPct)% elapsed"
-    }
 
     /// The authoritative session reset from live, parenthetical timezone stripped for width
     /// ("12:29am (Europe/Rome)" → "12:29am"). nil when live carries no reset text.
@@ -120,10 +112,13 @@ struct SubscriptionPanel: View {
             }
             .padding(.horizontal, 18).padding(.top, 16)
 
-            // 5-hour session progress (live %, cap %, or time-elapsed — always labeled).
+            // 5-hour session — the WINDOW'S TIME progress. The ring above already owns the
+            // quota % (and "% used" is just its complement), so this row shows how far through
+            // the 5-hour block we are — its own title — instead of restating the gauge. Fill =
+            // elapsed; trailing = time remaining.
             barRow(title: "5-hour session",
-                   trailing: barTrailing,
-                   fraction: barUsed, color: Theme.green)
+                   trailing: w.active ? "\(Fmt.duration(w.secondsToReset(now: now))) left" : "window idle",
+                   fraction: w.active ? max(0, 1 - timeLeft) : 0, color: Theme.green)
                 .padding(.horizontal, 18).padding(.top, 14)
 
             // Weekly limit — only the live reading knows this. Shown whenever live is fresh
