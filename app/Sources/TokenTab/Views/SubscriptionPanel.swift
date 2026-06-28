@@ -155,11 +155,7 @@ struct SubscriptionPanel: View {
 
             // SIDE METRIC: tokens today, demoted (Claude row; Codex hidden until its parser ships).
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    SectionLabel(text: "TODAY · \(Fmt.abbrev(snapshot.agg.today)) TOKENS")
-                    Spacer()
-                    Text("side metric").font(.system(size: 10)).foregroundStyle(Theme.faint)
-                }
+                SectionLabel(text: "TODAY · \(Fmt.abbrev(snapshot.agg.today)) TOKENS")
                 AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit)
             }
             .padding(.horizontal, 18).padding(.top, 13)
