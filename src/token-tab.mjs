@@ -43,7 +43,7 @@ function loadLocalConfig() {
       continue;
     }
     for (const line of txt.split("\n")) {
-      const m = line.match(/^\s*(TOKENTAB_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+      const m = line.match(/^\s*(TOKENTAB_[A-Z0-9_]+|CLAUDE_CODE_USE_BEDROCK)\s*=\s*(.*?)\s*$/);
       if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
     }
   }
@@ -151,6 +151,33 @@ function isLiveEnabled(v) {
   return typeof v === "string" && /^(1|true|yes|on)$/i.test(v.trim());
 }
 
+// Force the displayed surface, mirroring the native app's Config.swift:
+//   TOKENTAB_MODE wins (bedrock | subscription/max/pro/sub | payg/pay-per-token/api/untracked),
+//   else a truthy CLAUDE_CODE_USE_BEDROCK forces bedrock, else null (auto-detect).
+// Needed because Claude Code on Bedrock logs bare claude-* ids that classify as
+// subscription — the logs alone can't reveal Bedrock.
+function resolveSurfaceOverride(env) {
+  const mode = (env.TOKENTAB_MODE || "").trim().toLowerCase();
+  switch (mode) {
+    case "bedrock":
+      return "bedrock";
+    case "subscription":
+    case "max":
+    case "pro":
+    case "sub":
+      return "subscription";
+    case "payg":
+    case "pay-per-token":
+    case "paypertoken":
+    case "api":
+    case "untracked":
+      return "untracked";
+  }
+  const bd = (env.CLAUDE_CODE_USE_BEDROCK || "").trim().toLowerCase();
+  if (bd === "1" || bd === "true" || bd === "yes" || bd === "on") return "bedrock";
+  return null;
+}
+
 async function main() {
   loadLocalConfig();
   const mode = process.argv.includes("--json")
@@ -207,7 +234,8 @@ async function main() {
     return;
   }
 
-  const surface = dominantSurface(agg.bySurface);
+  const surfaceOverride = resolveSurfaceOverride(process.env);
+  const surface = surfaceOverride ?? dominantSurface(agg.bySurface);
   const w = agg.window;
 
   if (mode === "swiftbar") {
@@ -297,7 +325,7 @@ async function main() {
     line("    estimate from a bundled price table — a tab, not an invoice.");
     line("");
   }
-  line(`  Surface: ${surface} (dominant)`);
+  line(`  Surface: ${surface} (${surfaceOverride ? "mode override" : "dominant"})`);
   for (const [s, n] of Object.entries(agg.bySurface).sort((a, b) => b[1] - a[1]))
     line(`    ${s.padEnd(13)} ${abbrev(n).padStart(8)}`);
   line("");
