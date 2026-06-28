@@ -126,7 +126,7 @@ struct SubscriptionPanel: View {
             if let l = snapshot.live, l.isFresh(now: now), let wk = l.weeklyPct {
                 barRow(title: "This week (all models)",
                        trailing: "\(wk)% used",
-                       fraction: Double(wk) / 100, color: Theme.indigo)
+                       fraction: Double(wk) / 100, color: Theme.green)
                     .padding(.horizontal, 18).padding(.top, 12)
             }
 
@@ -136,7 +136,7 @@ struct SubscriptionPanel: View {
                 if w.cap > 0 {
                     barRow(title: "Window tokens",
                            trailing: "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))",
-                           fraction: Double(w.tokens) / Double(w.cap), color: Theme.indigo)
+                           fraction: Double(w.tokens) / Double(w.cap), color: Theme.green)
                 } else {
                     VStack(spacing: 11) {
                         HStack {
