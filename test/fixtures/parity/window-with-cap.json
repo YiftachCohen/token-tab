@@ -1,0 +1,33 @@
+{
+  "name": "active window with a configured cap -> pct = tokens/cap",
+  "_comment": "Same records as window-active-no-cap; cap=600 makes pct real (300/600=50). today/cost.today omitted for the same TZ reason noted there.",
+  "now": "2026-06-20T18:00:00Z",
+  "cap": 600,
+  "records": [
+    {
+      "messageId": "y", "requestId": "yr", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 1000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-19T10:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "a1", "requestId": "ar1", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T16:30:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "a2", "requestId": "ar2", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T17:00:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 1300,
+    "thisWeek": 1300,
+    "rolling5h": 300,
+    "byClass": { "input": 1300, "cacheCreate": 0, "cacheRead": 0, "output": 0 },
+    "bySurface": { "subscription": 1300, "bedrock": 0, "untracked": 0 },
+    "byModel": { "claude-opus-4-8": 1300 },
+    "window": { "active": true, "tokens": 300, "calibratedCap": 1000, "resetMs": 1781991000000, "pct": 50 },
+    "cost": { "total": 0.0065, "byModel": { "claude-opus-4-8": 0.0065 }, "unpricedTokens": 0 }
+  }
+}

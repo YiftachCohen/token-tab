@@ -43,6 +43,15 @@ fixture (`test/core.test.mjs`) should have a Swift twin (`app/Tests/TokenTabCore
 The price/classifier tables are hand-mirrored across the two files — edit them in
 lockstep.
 
+**Shared parity fixtures.** The JSON files in `test/fixtures/parity/*.json` are the
+proof of parity: each holds input records plus the expected shared-subset aggregate, and
+**both** runners load the same files — `node --test` via `test/parity.test.mjs` and
+`swift test` via `app/Tests/TokenTabCoreTests/ParityTests.swift`. A change to dedup,
+surface routing, windowing, or the rate tables must keep both green; surface a new
+behavior by adding a fixture there rather than hand-copying another twin test. (Each
+fixture asserts only the fields it pins; `today`/`cost.today` are local-calendar values,
+so pin them only where a fixture is timezone-independent.)
+
 ## Build / test / audit
 
 ```sh

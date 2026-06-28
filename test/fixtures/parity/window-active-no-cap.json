@@ -1,0 +1,33 @@
+{
+  "name": "active window: calibratedCap from a distinct completed block, no cap -> pct null",
+  "_comment": "today/cost.today are intentionally absent from expect: they key off the LOCAL calendar day, so a record 1-1.5h before `now` lands on a different local day in zones near UTC+6 (the loaders only assert fields present in expect). thisWeek/rolling5h/window are absolute-time and TZ-stable.",
+  "now": "2026-06-20T18:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "y", "requestId": "yr", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 1000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-19T10:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "a1", "requestId": "ar1", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T16:30:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "a2", "requestId": "ar2", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T17:00:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 1300,
+    "thisWeek": 1300,
+    "rolling5h": 300,
+    "byClass": { "input": 1300, "cacheCreate": 0, "cacheRead": 0, "output": 0 },
+    "bySurface": { "subscription": 1300, "bedrock": 0, "untracked": 0 },
+    "byModel": { "claude-opus-4-8": 1300 },
+    "window": { "active": true, "tokens": 300, "calibratedCap": 1000, "resetMs": 1781991000000, "pct": null },
+    "cost": { "total": 0.0065, "byModel": { "claude-opus-4-8": 0.0065 }, "unpricedTokens": 0 }
+  }
+}
