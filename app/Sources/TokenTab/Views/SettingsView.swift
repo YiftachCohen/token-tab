@@ -16,6 +16,7 @@ struct SettingsView: View {
     var onClose: () -> Void
 
     @State private var capText = ""
+    @FocusState private var capFocused: Bool
 
     private var snapshot: Snapshot { store.snapshot }
 
@@ -33,11 +34,8 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             PanelHeader(pill:
                 Button(action: onClose) {
-                    HStack(spacing: 4) {
-                        Text("Done").font(.system(size: 11, weight: .semibold))
-                        Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                    }
-                    .foregroundStyle(Theme.muted)
+                    Text("Done").font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
                 }
                 .buttonStyle(.plain)
             )
@@ -46,16 +44,10 @@ struct SettingsView: View {
             // Finder-launched, App-Sandboxed app can actually reach (env vars and the dotfile can't).
             VStack(alignment: .leading, spacing: 9) {
                 SectionLabel(text: "DISPLAY MODE")
-                Text("On Bedrock, Claude Code logs look like a subscription. Pick Bedrock / API to force the pay-per-token view. Stays on this Mac — no network.")
+                Text("On Bedrock, Claude Code logs look like a subscription. Pick Bedrock / API to force the pay-per-token view.")
                     .font(.system(size: 11)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Picker("", selection: modeSelection) {
-                    Text("Auto").tag("auto")
-                    Text("Subscription").tag(Surface.subscription.rawValue)
-                    Text("Bedrock / API").tag(Surface.bedrock.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                modePicker
             }
             .padding(.horizontal, 18).padding(.top, 14)
 
@@ -64,13 +56,15 @@ struct SettingsView: View {
             // 5-HOUR TOKEN CAP — works in any mode; the subscription gauge reads it for a real %.
             VStack(alignment: .leading, spacing: 9) {
                 SectionLabel(text: "5-HOUR TOKEN CAP")
-                Text("Your plan's 5-hour token limit. Setting it turns the subscription runway into a real “% left”. Stays on this Mac — no network.")
+                Text("Your plan's 5-hour token limit. Setting it turns the runway into a real “% left”.")
                     .font(.system(size: 11)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     TextField("tokens, e.g. 400000000", text: $capText)
-                        .textFieldStyle(.roundedBorder).font(Theme.figure(11))
+                        .textFieldStyle(.plain).font(Theme.figure(11))
+                        .focused($capFocused)
                         .frame(maxWidth: .infinity)
+                        .tokenFieldChrome(focused: capFocused)
                         .onSubmit(commitCap)
                     Button("Save", action: commitCap)
                         .buttonStyle(.borderedProminent).tint(Theme.green)
@@ -135,6 +129,36 @@ struct SettingsView: View {
         } else {
             Text("off").font(.system(size: 9.5, weight: .semibold)).foregroundStyle(Theme.faint)
         }
+    }
+
+    /// On-brand 3-way segmented control (green selection on a subtle track) matching the app's
+    /// SegmentedToggle — replaces the stock `.segmented` Picker, whose system-blue chrome was the
+    /// one element breaking the panel's dark/green/glass look.
+    private var modePicker: some View {
+        HStack(spacing: 2) {
+            modeSeg("Auto", "auto")
+            modeSeg("Subscription", Surface.subscription.rawValue)
+            modeSeg("Bedrock / API", Surface.bedrock.rawValue)
+        }
+        .padding(2)
+        .background(Theme.subtleFill, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func modeSeg(_ title: String, _ tag: String) -> some View {
+        let on = modeSelection.wrappedValue == tag
+        return Text(title)
+            .font(.system(size: 11, weight: on ? .semibold : .medium))
+            .foregroundStyle(on ? Theme.onAccent : Theme.muted)
+            .lineLimit(1).minimumScaleFactor(0.85)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(on ? Theme.green : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .shadow(color: on ? Theme.green.opacity(0.3) : .clear, radius: 4, y: 1)
+            .contentShape(Rectangle())
+            .onTapGesture { modeSelection.wrappedValue = tag }
+            .accessibilityElement()
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 
     private func commitCap() {

@@ -17,6 +17,7 @@ struct SubscriptionPanel: View {
     @State private var editingCap = false
     @State private var capText = ""
     @State private var showLiveHelp = false
+    @FocusState private var capFocused: Bool
 
     private var snapshot: Snapshot { store.snapshot }
     private var w: WindowStats { snapshot.agg.window }
@@ -32,14 +33,6 @@ struct SubscriptionPanel: View {
 
     /// The ring's fill: quota-left when we have it, else the time countdown.
     private var heroFraction: Double { hasQuota ? Double(quotaLeft ?? 0) / 100 : timeLeft }
-    /// The 5-hour bar's fill (used side): quota-used when we have a %, else time-elapsed.
-    private var barUsed: Double { hasQuota ? Double(100 - (quotaLeft ?? 100)) / 100 : (1 - timeLeft) }
-    private var barUsedPct: Int { max(0, min(100, Int((barUsed * 100).rounded()))) }
-    private var barTrailing: String {
-        if isLive { return "\(barUsedPct)% used · live" }
-        if hasQuota { return "\(barUsedPct)% of cap" }
-        return "\(barUsedPct)% elapsed"
-    }
 
     /// The authoritative session reset from live, parenthetical timezone stripped for width
     /// ("12:29am (Europe/Rome)" → "12:29am"). nil when live carries no reset text.
@@ -120,18 +113,23 @@ struct SubscriptionPanel: View {
             }
             .padding(.horizontal, 18).padding(.top, 16)
 
-            // 5-hour session progress (live %, cap %, or time-elapsed — always labeled).
-            barRow(title: "5-hour session",
-                   trailing: barTrailing,
-                   fraction: barUsed, color: Theme.green)
-                .padding(.horizontal, 18).padding(.top, 14)
+            // 5-hour session TIME bar — only when LIVE. In live mode the runway shows an absolute
+            // reset time, so this progress bar adds the "how far through the window" view. With a
+            // cap or in time-only mode the runway headline (or the ring) already states the
+            // window's countdown, so the bar would just echo it — hide it there.
+            if isLive {
+                barRow(title: "5-hour session",
+                       trailing: w.active ? "\(Fmt.duration(w.secondsToReset(now: now))) left" : "window idle",
+                       fraction: w.active ? max(0, 1 - timeLeft) : 0, color: Theme.green)
+                    .padding(.horizontal, 18).padding(.top, 14)
+            }
 
             // Weekly limit — only the live reading knows this. Shown whenever live is fresh
             // and carries a weekly %, independent of the session headline's source.
             if let l = snapshot.live, l.isFresh(now: now), let wk = l.weeklyPct {
                 barRow(title: "This week (all models)",
-                       trailing: "\(wk)% used · live",
-                       fraction: Double(wk) / 100, color: Theme.indigo)
+                       trailing: "\(wk)% used",
+                       fraction: Double(wk) / 100, color: Theme.green)
                     .padding(.horizontal, 18).padding(.top, 12)
             }
 
@@ -141,7 +139,7 @@ struct SubscriptionPanel: View {
                 if w.cap > 0 {
                     barRow(title: "Window tokens",
                            trailing: "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))",
-                           fraction: barUsed, color: Theme.indigo)
+                           fraction: Double(w.tokens) / Double(w.cap), color: Theme.green)
                 } else {
                     VStack(spacing: 11) {
                         HStack {
@@ -160,12 +158,9 @@ struct SubscriptionPanel: View {
 
             // SIDE METRIC: tokens today, demoted (Claude row; Codex hidden until its parser ships).
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    SectionLabel(text: "TODAY · \(Fmt.abbrev(snapshot.agg.today)) TOKENS")
-                    Spacer()
-                    Text("side metric").font(.system(size: 10)).foregroundStyle(Theme.faint)
-                }
-                AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit)
+                SectionLabel(text: "TODAY · \(Fmt.abbrev(snapshot.agg.today)) TOKENS")
+                AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit,
+                         denominator: snapshot.agg.today)
             }
             .padding(.horizontal, 18).padding(.top, 13)
 
@@ -284,7 +279,9 @@ struct SubscriptionPanel: View {
             HStack {
                 Text(title).font(.system(size: 11)).foregroundStyle(Theme.muted)
                 Spacer()
-                Text(trailing).font(Theme.figure(11, weight: .regular)).foregroundStyle(Theme.faint)
+                // The value is what the user came to read; it must not be dimmer than its
+                // label. `muted` (not `faint`) keeps it legible and above the AA contrast floor.
+                Text(trailing).font(Theme.figure(11, weight: .regular)).foregroundStyle(Theme.muted)
             }
             MiniBar(fraction: fraction, color: color)
         }
@@ -303,9 +300,11 @@ struct SubscriptionPanel: View {
         if editingCap {
             HStack(spacing: 8) {
                 TextField("tokens, e.g. 220000000", text: $capText)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .font(Theme.figure(11))
+                    .focused($capFocused)
                     .frame(maxWidth: .infinity)
+                    .tokenFieldChrome(focused: capFocused)
                     .onSubmit(commitCap)
                 Button("Save", action: commitCap)
                     .buttonStyle(.borderedProminent).tint(Theme.green)
@@ -345,12 +344,17 @@ struct AgentRow: View {
     var name: String
     var color: Color
     var split: MainSubSplit
+    /// The section total (sum across agents) so each row's bar shows that agent's SHARE of the
+    /// day, comparable across rows — rather than self-normalising to a full bar that conveys no
+    /// magnitude. With a single agent the denominator equals the row's own total, so the bar
+    /// reads full exactly as before; once a second agent appears the bars become proportional.
+    var denominator: Int
 
     private var mainFrac: Double {
-        split.total > 0 ? Double(split.mainTokens) / Double(split.total) : 0
+        denominator > 0 ? Double(split.mainTokens) / Double(denominator) : 0
     }
     private var subFrac: Double {
-        split.total > 0 ? Double(split.subTokens) / Double(split.total) : 0
+        denominator > 0 ? Double(split.subTokens) / Double(denominator) : 0
     }
 
     var body: some View {

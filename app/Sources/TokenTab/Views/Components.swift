@@ -162,3 +162,23 @@ struct Card: ViewModifier {
 extension View {
     func card(radius: CGFloat = 10) -> some View { modifier(Card(radius: radius)) }
 }
+
+/// Themed text-field chrome (replaces the stock `.roundedBorder`, which read foreign on the dark
+/// glass): a subtle fill + hairline, with a green ring when focused. Pair with
+/// `.textFieldStyle(.plain)` and a `@FocusState` passed in via `focused`, so the cap inputs match
+/// the panel in both appearances.
+struct TokenFieldChrome: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    var focused: Bool
+    func body(content: Content) -> some View {
+        content
+            .padding(.vertical, 6).padding(.horizontal, 9)
+            .background(Theme.cardFill(scheme), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7)
+                .strokeBorder(focused ? Theme.green.opacity(0.7) : Theme.cardStroke(scheme),
+                              lineWidth: focused ? 1 : 0.75))
+    }
+}
+extension View {
+    func tokenFieldChrome(focused: Bool) -> some View { modifier(TokenFieldChrome(focused: focused)) }
+}
