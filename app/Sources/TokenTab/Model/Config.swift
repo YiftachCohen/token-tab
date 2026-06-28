@@ -11,6 +11,12 @@ import Foundation
 import TokenTabCore
 
 enum Config {
+    /// The local dotfile values, parsed ONCE per process (matches the JS engine, which
+    /// reads ~/.config/token-tab/env once at startup via loadLocalConfig()). Real env vars
+    /// still take precedence and are read live in `string(_:)`. Reads a local file only —
+    /// no network, no subprocess.
+    private static let fileValues: [String: String] = loadFileValues()
+
     private static func loadFileValues() -> [String: String] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let candidates = [
@@ -37,7 +43,7 @@ enum Config {
 
     static func string(_ key: String) -> String? {
         if let v = ProcessInfo.processInfo.environment[key], !v.isEmpty { return v } // real env wins
-        return loadFileValues()[key]
+        return fileValues[key]   // cached; no longer re-reads disk per call
     }
 
     /// The plan's 5h token cap (TOKENTAB_WINDOW_CAP), to show a window %. 0 if unset —
