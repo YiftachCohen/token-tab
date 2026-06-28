@@ -17,6 +17,7 @@ struct SubscriptionPanel: View {
     @State private var editingCap = false
     @State private var capText = ""
     @State private var showLiveHelp = false
+    @FocusState private var capFocused: Bool
 
     private var snapshot: Snapshot { store.snapshot }
     private var w: WindowStats { snapshot.agg.window }
@@ -299,9 +300,11 @@ struct SubscriptionPanel: View {
         if editingCap {
             HStack(spacing: 8) {
                 TextField("tokens, e.g. 220000000", text: $capText)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .font(Theme.figure(11))
+                    .focused($capFocused)
                     .frame(maxWidth: .infinity)
+                    .tokenFieldChrome(focused: capFocused)
                     .onSubmit(commitCap)
                 Button("Save", action: commitCap)
                     .buttonStyle(.borderedProminent).tint(Theme.green)
