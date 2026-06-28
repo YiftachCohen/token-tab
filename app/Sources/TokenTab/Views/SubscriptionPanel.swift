@@ -112,14 +112,16 @@ struct SubscriptionPanel: View {
             }
             .padding(.horizontal, 18).padding(.top, 16)
 
-            // 5-hour session — the WINDOW'S TIME progress. The ring above already owns the
-            // quota % (and "% used" is just its complement), so this row shows how far through
-            // the 5-hour block we are — its own title — instead of restating the gauge. Fill =
-            // elapsed; trailing = time remaining.
-            barRow(title: "5-hour session",
-                   trailing: w.active ? "\(Fmt.duration(w.secondsToReset(now: now))) left" : "window idle",
-                   fraction: w.active ? max(0, 1 - timeLeft) : 0, color: Theme.green)
-                .padding(.horizontal, 18).padding(.top, 14)
+            // 5-hour session TIME bar — only when LIVE. In live mode the runway shows an absolute
+            // reset time, so this progress bar adds the "how far through the window" view. With a
+            // cap or in time-only mode the runway headline (or the ring) already states the
+            // window's countdown, so the bar would just echo it — hide it there.
+            if isLive {
+                barRow(title: "5-hour session",
+                       trailing: w.active ? "\(Fmt.duration(w.secondsToReset(now: now))) left" : "window idle",
+                       fraction: w.active ? max(0, 1 - timeLeft) : 0, color: Theme.green)
+                    .padding(.horizontal, 18).padding(.top, 14)
+            }
 
             // Weekly limit — only the live reading knows this. Shown whenever live is fresh
             // and carries a weekly %, independent of the session headline's source.
