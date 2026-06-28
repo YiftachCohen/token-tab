@@ -279,7 +279,9 @@ struct SubscriptionPanel: View {
             HStack {
                 Text(title).font(.system(size: 11)).foregroundStyle(Theme.muted)
                 Spacer()
-                Text(trailing).font(Theme.figure(11, weight: .regular)).foregroundStyle(Theme.faint)
+                // The value is what the user came to read; it must not be dimmer than its
+                // label. `muted` (not `faint`) keeps it legible and above the AA contrast floor.
+                Text(trailing).font(Theme.figure(11, weight: .regular)).foregroundStyle(Theme.muted)
             }
             MiniBar(fraction: fraction, color: color)
         }
