@@ -156,7 +156,8 @@ struct SubscriptionPanel: View {
             // SIDE METRIC: tokens today, demoted (Claude row; Codex hidden until its parser ships).
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel(text: "TODAY · \(Fmt.abbrev(snapshot.agg.today)) TOKENS")
-                AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit)
+                AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit,
+                         denominator: snapshot.agg.today)
             }
             .padding(.horizontal, 18).padding(.top, 13)
 
@@ -338,12 +339,17 @@ struct AgentRow: View {
     var name: String
     var color: Color
     var split: MainSubSplit
+    /// The section total (sum across agents) so each row's bar shows that agent's SHARE of the
+    /// day, comparable across rows — rather than self-normalising to a full bar that conveys no
+    /// magnitude. With a single agent the denominator equals the row's own total, so the bar
+    /// reads full exactly as before; once a second agent appears the bars become proportional.
+    var denominator: Int
 
     private var mainFrac: Double {
-        split.total > 0 ? Double(split.mainTokens) / Double(split.total) : 0
+        denominator > 0 ? Double(split.mainTokens) / Double(denominator) : 0
     }
     private var subFrac: Double {
-        split.total > 0 ? Double(split.subTokens) / Double(split.total) : 0
+        denominator > 0 ? Double(split.subTokens) / Double(denominator) : 0
     }
 
     var body: some View {
