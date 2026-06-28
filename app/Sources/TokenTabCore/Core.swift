@@ -61,6 +61,23 @@ public enum Surface: String, Sendable {
     case untracked
 }
 
+/// Resolve the surface the UI should display, by precedence:
+///   1. an explicit in-app choice (persisted),
+///   2. an explicit TOKENTAB_MODE env/dotfile override,
+///   3. the CLAUDE_CODE_USE_BEDROCK flag (forces Bedrock),
+///   4. the auto-detected dominant surface from the logs.
+/// Bedrock logs bare claude-* ids that auto-detect as `.subscription`, so an explicit
+/// signal is the only way to surface Bedrock — and in the sandbox only (1) is reachable.
+public func resolveSurface(inApp: Surface?,
+                           envOverride: Surface?,
+                           forceBedrock: Bool,
+                           dominant: Surface) -> Surface {
+    if let inApp { return inApp }
+    if let envOverride { return envOverride }
+    if forceBedrock { return .bedrock }
+    return dominant
+}
+
 public enum ModelUtil {
     /// Strip the `[1m]` 1M-context suffix; report whether it was present.
     public static func normalize(_ model: String) -> (base: String, oneM: Bool) {

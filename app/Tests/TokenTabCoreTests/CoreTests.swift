@@ -80,6 +80,21 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(ModelUtil.classifySurface("gpt-5.5"), .untracked)
     }
 
+    func testResolveSurfacePrecedence() {
+        // In-app choice wins over everything.
+        XCTAssertEqual(resolveSurface(inApp: .bedrock, envOverride: .subscription,
+                                      forceBedrock: false, dominant: .subscription), .bedrock)
+        // No in-app choice → env override wins over the flag and dominant.
+        XCTAssertEqual(resolveSurface(inApp: nil, envOverride: .subscription,
+                                      forceBedrock: true, dominant: .bedrock), .subscription)
+        // No in-app, no env → the bedrock flag forces bedrock.
+        XCTAssertEqual(resolveSurface(inApp: nil, envOverride: nil,
+                                      forceBedrock: true, dominant: .subscription), .bedrock)
+        // Nothing set → auto-detected dominant.
+        XCTAssertEqual(resolveSurface(inApp: nil, envOverride: nil,
+                                      forceBedrock: false, dominant: .subscription), .subscription)
+    }
+
     func testOneMSuffixNormalizes() {
         let n = ModelUtil.normalize("claude-opus-4-8[1m]")
         XCTAssertEqual(n.base, "claude-opus-4-8")
