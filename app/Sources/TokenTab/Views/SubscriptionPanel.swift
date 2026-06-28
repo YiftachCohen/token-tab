@@ -141,7 +141,7 @@ struct SubscriptionPanel: View {
                 if w.cap > 0 {
                     barRow(title: "Window tokens",
                            trailing: "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))",
-                           fraction: barUsed, color: Theme.indigo)
+                           fraction: Double(w.tokens) / Double(w.cap), color: Theme.indigo)
                 } else {
                     VStack(spacing: 11) {
                         HStack {
