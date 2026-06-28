@@ -224,4 +224,46 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Pricing.canonicalModelId("us.anthropic.claude-opus-4-8-20251101-v1:0"), "claude-opus-4-8")
         XCTAssertEqual(Pricing.canonicalModelId("claude-opus-4-8[1m]"), "claude-opus-4-8")
     }
+
+    // MARK: - Burn-path aggregate fields (Swift-only; no JS twin → live here, not in ParityTests).
+
+    func testLastHourTokensWindow() {
+        let now = date("2026-06-20T18:00:00Z")
+        let within = rec(messageId: "a", requestId: "1",
+                         usage: u(10, 0, 0, 0), timestamp: "2026-06-20T17:30:00Z")   // 30m ago
+        let outside = rec(messageId: "b", requestId: "2",
+                          usage: u(20, 0, 0, 0), timestamp: "2026-06-20T16:30:00Z")  // 90m ago
+        let a = aggregate([within, outside], options: AggregateOptions(now: now))
+        XCTAssertEqual(a.lastHourTokens, 10, "only the record inside the last hour counts to burn")
+        XCTAssertEqual(a.total, 30, "both still in all-time total")
+    }
+
+    func testTodaySplitMainVsSub() {
+        let now = date("2026-06-20T18:00:00Z")
+        let main = rec(messageId: "a", requestId: "1", usage: u(10, 0, 0, 0),
+                       timestamp: "2026-06-20T12:00:00Z", isSidechain: false)
+        let sub  = rec(messageId: "b", requestId: "2", usage: u(7, 0, 0, 0),
+                       timestamp: "2026-06-20T12:30:00Z", isSidechain: true)
+        let old  = rec(messageId: "c", requestId: "3", usage: u(99, 0, 0, 0),
+                       timestamp: "2026-06-10T12:00:00Z", isSidechain: false)  // not today
+        let a = aggregate([main, sub, old], options: AggregateOptions(now: now))
+        XCTAssertEqual(a.todaySplit.mainTokens, 10)
+        XCTAssertEqual(a.todaySplit.subTokens, 7)
+        XCTAssertEqual(a.todaySplit.total, 17, "old record is excluded from today's split")
+        XCTAssertEqual(a.split.mainTokens, 109, "all-time split still includes the old main record")
+    }
+
+    func testCostWindowsMirrorTokenWindows() {
+        let now = date("2026-06-20T18:00:00Z")
+        // $5 each (1M input tokens at $5/M opus-4-8).
+        let recent = rec(messageId: "t", requestId: "1", model: "claude-opus-4-8",
+                         usage: u(1_000_000, 0, 0, 0), timestamp: "2026-06-20T17:30:00Z") // today + 5h + 1h
+        let older  = rec(messageId: "o", requestId: "2", model: "claude-opus-4-8",
+                         usage: u(1_000_000, 0, 0, 0), timestamp: "2026-06-10T10:00:00Z") // all-time only
+        let a = aggregate([recent, older], options: AggregateOptions(now: now), costModel: Pricing())
+        XCTAssertEqual(a.cost?.total ?? .nan, 10, accuracy: 1e-9, "both records")
+        XCTAssertEqual(a.cost?.today ?? .nan, 5, accuracy: 1e-9, "only the recent one")
+        XCTAssertEqual(a.cost?.rolling5h ?? .nan, 5, accuracy: 1e-9)
+        XCTAssertEqual(a.cost?.lastHour ?? .nan, 5, accuracy: 1e-9, "30m ago is inside the burn hour")
+    }
 }
