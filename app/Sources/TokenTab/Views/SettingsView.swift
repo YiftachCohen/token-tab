@@ -19,6 +19,16 @@ struct SettingsView: View {
 
     private var snapshot: Snapshot { store.snapshot }
 
+    /// Bridges the segmented Picker (needs a `Hashable` tag) to the store's `Surface?`.
+    /// "auto" ⇄ nil; otherwise the Surface rawValue. Only Auto/Subscription/Bedrock are
+    /// offered — `.untracked` isn't a useful user choice.
+    private var modeSelection: Binding<String> {
+        Binding(
+            get: { store.surfaceModeOverride?.rawValue ?? "auto" },
+            set: { store.surfaceModeOverride = ($0 == "auto") ? nil : Surface(rawValue: $0) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PanelHeader(pill:
@@ -31,6 +41,25 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
             )
+
+            // DISPLAY MODE — the sandbox-clean override (UserDefaults), the only one a
+            // Finder-launched, App-Sandboxed app can actually reach (env vars and the dotfile can't).
+            VStack(alignment: .leading, spacing: 9) {
+                SectionLabel(text: "DISPLAY MODE")
+                Text("On Bedrock, Claude Code logs look like a subscription. Pick Bedrock / API to force the pay-per-token view. Stays on this Mac — no network.")
+                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Picker("", selection: modeSelection) {
+                    Text("Auto").tag("auto")
+                    Text("Subscription").tag(Surface.subscription.rawValue)
+                    Text("Bedrock / API").tag(Surface.bedrock.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            .padding(.horizontal, 18).padding(.top, 14)
+
+            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
 
             // 5-HOUR TOKEN CAP — works in any mode; the subscription gauge reads it for a real %.
             VStack(alignment: .leading, spacing: 9) {
