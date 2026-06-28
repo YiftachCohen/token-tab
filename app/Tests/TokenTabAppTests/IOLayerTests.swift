@@ -91,6 +91,28 @@ final class IOLayerTests: XCTestCase {
         XCTAssertEqual(malformed, 0)
     }
 
+    // MARK: - LogReader.findJSONL
+
+    /// Parity with the JS walker: a *.jsonl under a HIDDEN directory is found (the JS findJsonl
+    /// recurses into all directories), while the hidden live-cache file (.token-tab-live.json,
+    /// not *.jsonl) is still excluded. Pins that findJSONL does not skip hidden paths.
+    func testFindJSONLDoesNotSkipHiddenPaths() throws {
+        // a normal log
+        try write("visible.jsonl", [assistantLine(id: "m1", req: "r1")])
+        // a log under a hidden subdir — JS would find this; Swift must too
+        let hiddenDir = dir.appendingPathComponent(".hidden")
+        try FileManager.default.createDirectory(at: hiddenDir, withIntermediateDirectories: true)
+        try (assistantLine(id: "m2", req: "r2") + "\n")
+            .write(to: hiddenDir.appendingPathComponent("buried.jsonl"), atomically: true, encoding: .utf8)
+        // the hidden live-cache file must stay excluded (not *.jsonl)
+        try "{}".write(to: dir.appendingPathComponent(".token-tab-live.json"), atomically: true, encoding: .utf8)
+
+        let found = LogReader.findJSONL(in: dir).map { $0.lastPathComponent }
+        XCTAssertTrue(found.contains("visible.jsonl"))
+        XCTAssertTrue(found.contains("buried.jsonl"), "a *.jsonl under a hidden dir must be found (JS parity)")
+        XCTAssertFalse(found.contains(".token-tab-live.json"), "the live-cache file is not *.jsonl → excluded")
+    }
+
     // MARK: - RecordCache
 
     /// Caching never changes the result: a fresh cache returns the same records (same count,
