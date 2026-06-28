@@ -6,7 +6,7 @@ design. It makes **no network calls** — the shipped build is App-Sandboxed wit
 network entitlement**, so "cannot phone home" is a fact macOS enforces, not a claim.
 
 The numbers come from a faithful Swift port of the audited JS engine (`../src/core.mjs`
-+ `pricing.mjs`); they reconcile **byte-for-byte** with `node ../src/token-tab.mjs --json`
++ `pricing.mjs`); their numbers reconcile **exactly** with `node ../src/token-tab.mjs --json`
 on the same logs (verified on 1,262 real files — see "Reconcile" below).
 
 ## Two modes — decided by your plan, not a toggle
@@ -96,14 +96,15 @@ app/
   Sources/TokenTabCore/         Core.swift / Pricing.swift / Format.swift — pure port of src/
   Sources/TokenTab/
     TokenTabApp.swift           @main MenuBarExtra agent (LSUIElement, no Dock icon)
-    Model/                      LogReader, Access (security-scoped grant), UsageStore, Config, Probe
-    Views/                      Theme, Components, MenuBarLabel, SubscriptionPanel, BurnPanel, DropdownView
+    Model/                      LogReader, LiveReader, Access (grant), UsageStore, Config, Probe, FolderWatcher
+    Views/                      Theme, Components, MenuBarLabel, SubscriptionPanel, BurnPanel, DropdownView, LoadingView, SettingsView
   Bundle/                       Info.plist (CFBundleIconFile) + TokenTab.entitlements (sandbox, no network)
   Branding/                     gauge logo sources (SVG) + generated favicons / wordmark / hero
   Scripts/build-app.sh          assemble + ad-hoc-sign the .app (regenerates the icon if missing)
   Scripts/make-icon.swift       Core Graphics renderer for the gauge mark (iconset / favicon / hero)
   Scripts/make-icon.sh          → Bundle/AppIcon.icns   ·   make-branding.sh → web/README assets
-  Tests/TokenTabCoreTests/      parity tests ported from ../test/core.test.mjs
+  Tests/TokenTabCoreTests/      core + parity tests ported from ../test/core.test.mjs
+  Tests/TokenTabAppTests/       I/O characterization tests (LogReader, RecordCache)
 ```
 
 ## Status / not yet
