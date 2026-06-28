@@ -125,7 +125,7 @@ struct SubscriptionPanel: View {
             // and carries a weekly %, independent of the session headline's source.
             if let l = snapshot.live, l.isFresh(now: now), let wk = l.weeklyPct {
                 barRow(title: "This week (all models)",
-                       trailing: "\(wk)% used · live",
+                       trailing: "\(wk)% used",
                        fraction: Double(wk) / 100, color: Theme.indigo)
                     .padding(.horizontal, 18).padding(.top, 12)
             }
