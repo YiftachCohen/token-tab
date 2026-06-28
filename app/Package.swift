@@ -26,5 +26,9 @@ let package = Package(
             name: "TokenTabCoreTests",
             dependencies: ["TokenTabCore"]
         ),
+        .testTarget(
+            name: "TokenTabAppTests",
+            dependencies: ["TokenTab"]
+        ),
     ]
 )
