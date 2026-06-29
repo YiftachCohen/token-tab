@@ -39,9 +39,13 @@ struct Snapshot {
     var lastUpdated: Date
     var cap: Int
     var live: LiveUsage?
+    /// Contiguous per-day usage ending today (60 days) — the History tab's series. Computed
+    /// off-main alongside `agg`; the view slices the last 7/14/30 and the prior period for it.
+    var history: [DayUsage] = []
 
     static let empty = Snapshot(agg: Aggregate(), mode: .burn, surface: .untracked, health: .neutral,
-                                fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0, live: nil)
+                                fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0, live: nil,
+                                history: [])
 
     /// The headline quota %, resolved down the trust ladder: a FRESH live reading first (the
     /// real server number), then a cap-based % (manual or live-calibrated). nil → no quota
@@ -181,11 +185,14 @@ final class UsageStore: ObservableObject {
         let forceBedrock = Config.useBedrock
         let inAppOverride = surfaceModeOverride   // @MainActor state, captured before detaching
         Task.detached(priority: .utility) {
+            let now0 = Date()
             let files = LogReader.findJSONL(in: dir)
             let (records, malformed) = cache.records(for: files)
             let agg = aggregate(records,
-                                options: AggregateOptions(cap: cap),
+                                options: AggregateOptions(now: now0, cap: cap),
                                 costModel: Pricing())
+            // 60 days covers the 30-day range plus its prior 30-day comparison period.
+            let history = dailyHistory(records, days: 60, now: now0, costModel: Pricing())
             let live = LiveReader.read(logDir: dir)   // opt-in cache; nil when no sidecar runs
             let override = Config.surfaceOverride
             await MainActor.run {
@@ -202,7 +209,7 @@ final class UsageStore: ObservableObject {
                 let health = Self.health(for: agg, live: live, now: now, mode: mode)
                 self.snapshot = Snapshot(agg: agg, mode: mode, surface: surface, health: health,
                                          fileCount: files.count, malformed: malformed,
-                                         lastUpdated: now, cap: cap, live: live)
+                                         lastUpdated: now, cap: cap, live: live, history: history)
                 // Learn the cap from a fresh live reading (cap ≈ tokens / sessionPct) so a real
                 // % survives once live goes stale. Takes effect on the next refresh's cap.
                 if let l = live, l.isFresh(now: now), let p = l.sessionPct,

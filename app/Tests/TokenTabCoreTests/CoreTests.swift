@@ -266,4 +266,64 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(a.cost?.rolling5h ?? .nan, 5, accuracy: 1e-9)
         XCTAssertEqual(a.cost?.lastHour ?? .nan, 5, accuracy: 1e-9, "30m ago is inside the burn hour")
     }
+
+    // MARK: - dailyHistory
+    //
+    // Day bucketing is LOCAL-time, so these assert TZ-robust facts only: timestamps sit at
+    // noon UTC and ≥48h apart (distinct local days in any zone), and "today" is stamped at
+    // the exact `now` instant (always the last bucket).
+
+    func testDailyHistoryContiguousAndTotals() {
+        let now = date("2026-06-20T12:00:00Z")
+        let records = [
+            rec(messageId: "t", requestId: "tr", usage: u(10, 0, 0, 5), timestamp: "2026-06-20T12:00:00Z"), // today, 15
+            rec(messageId: "a", requestId: "ar", usage: u(100, 0, 0, 0), timestamp: "2026-06-18T12:00:00Z"), // -2d, 100
+            rec(messageId: "b", requestId: "br", usage: u(0, 0, 0, 7), timestamp: "2026-06-16T12:00:00Z"),   // -4d, 7
+        ]
+        let h = dailyHistory(records, days: 7, now: now)
+        XCTAssertEqual(h.count, 7, "always a contiguous run of `days` days")
+        XCTAssertEqual(h.reduce(0) { $0 + $1.tokens }, 122, "every record falls in the window")
+        XCTAssertEqual(h.last?.tokens, 15, "the now-stamped record is today (last bucket)")
+        XCTAssertEqual(h.filter { $0.tokens > 0 }.count, 3, "three distinct days, gaps zero-filled")
+    }
+
+    func testDailyHistoryDedupKeepLast() {
+        let now = date("2026-06-20T12:00:00Z")
+        let partial = rec(messageId: "t", requestId: "tr", usage: u(5, 1151, 34462, 2),   timestamp: "2026-06-20T12:00:00Z")
+        let final   = rec(messageId: "t", requestId: "tr", usage: u(5, 1151, 34462, 227), timestamp: "2026-06-20T12:00:00Z")
+        let h = dailyHistory([partial, final], days: 3, now: now)
+        XCTAssertEqual(h.reduce(0) { $0 + $1.tokens }, 35845, "same keep-last rule as aggregate")
+        XCTAssertEqual(h.last?.tokens, 35845)
+    }
+
+    func testDailyHistoryCostAndModelBreakdown() {
+        let now = date("2026-06-20T12:00:00Z")
+        let h = dailyHistory([rec(messageId: "t", requestId: "tr",
+                                  model: "claude-opus-4-8", usage: u(10, 20, 30, 5),
+                                  timestamp: "2026-06-20T12:00:00Z")],
+                             days: 3, now: now, costModel: Pricing())
+        let expected: Double = (10.0 * 5 + 20.0 * 6.25 + 30.0 * 0.5 + 5.0 * 25) / 1_000_000
+        XCTAssertEqual(h.last?.cost ?? -1, expected, accuracy: 1e-12)
+        XCTAssertEqual(h.last?.tokensByModel["claude-opus-4-8"], 65)
+        XCTAssertEqual(h.last?.costByModel["claude-opus-4-8"] ?? -1, expected, accuracy: 1e-12)
+    }
+
+    func testDailyHistorySkipsUntimestamped() {
+        let now = date("2026-06-20T12:00:00Z")
+        let records = [
+            rec(messageId: "n", requestId: "nr", usage: u(9, 0, 0, 0), timestamp: nil),               // no day → skipped
+            rec(messageId: "t", requestId: "tr", usage: u(0, 0, 0, 4), timestamp: "2026-06-20T12:00:00Z"),
+        ]
+        let h = dailyHistory(records, days: 3, now: now)
+        XCTAssertEqual(h.reduce(0) { $0 + $1.tokens }, 4, "an undateable record can't be placed on a day")
+    }
+
+    func testModelName() {
+        XCTAssertEqual(Fmt.modelName("claude-opus-4-1-20250514"), "Opus 4.1")
+        XCTAssertEqual(Fmt.modelName("claude-sonnet-4-5"), "Sonnet 4.5")
+        XCTAssertEqual(Fmt.modelName("claude-haiku-4-5"), "Haiku 4.5")
+        XCTAssertEqual(Fmt.modelName("us.anthropic.claude-opus-4-8-20251101-v1:0"), "Opus 4.8")
+        XCTAssertEqual(Fmt.modelName("claude-fable-5"), "Fable 5")
+        XCTAssertEqual(Fmt.modelName("sonnet"), "Sonnet")
+    }
 }
