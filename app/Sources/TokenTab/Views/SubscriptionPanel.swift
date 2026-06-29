@@ -150,7 +150,7 @@ struct SubscriptionPanel: View {
                     }
                 }
             }
-            .padding(.horizontal, 17).padding(.top, 13)
+            .padding(.horizontal, 17).padding(.top, 12)
 
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
 
@@ -160,7 +160,7 @@ struct SubscriptionPanel: View {
                 AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit,
                          denominator: snapshot.agg.today)
             }
-            .padding(.horizontal, 17).padding(.top, 13)
+            .padding(.horizontal, 17).padding(.top, 12)
 
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             VStack(alignment: .leading, spacing: 9) {
