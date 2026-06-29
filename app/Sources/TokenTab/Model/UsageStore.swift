@@ -119,8 +119,10 @@ final class UsageStore: ObservableObject {
     private var pendingRefresh = false
     private var logDirProvider: () -> URL?
     /// Re-parses only the files that changed since the last refresh (keyed by mtime+size),
-    /// so an active session's constant FSEvents bursts don't re-read the whole history.
-    private let recordCache = RecordCache()
+    /// so an active session's constant FSEvents bursts don't re-read the whole history — and
+    /// persists across launches, so a cold start re-parses only what changed rather than the
+    /// whole log history (the slow first read that left the loading screen up for seconds).
+    private let recordCache = RecordCache(storeURL: RecordCache.defaultStoreURL())
 
     init(logDir: @escaping () -> URL?) {
         self.logDirProvider = logDir

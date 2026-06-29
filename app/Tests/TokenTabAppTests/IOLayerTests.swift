@@ -177,4 +177,59 @@ final class IOLayerTests: XCTestCase {
         XCTAssertEqual(second.records.count, 1, "the deleted file's records are gone")
         XCTAssertEqual(second.records.first?.messageId, "m1")
     }
+
+    // MARK: - RecordCache persistence (cross-launch)
+
+    /// The cache PERSISTS across instances (a fresh app launch): a second `RecordCache` pointed
+    /// at the same store file hydrates the parsed records from disk and reuses them for a file
+    /// whose fingerprint (mtime+size) is unchanged — WITHOUT re-reading it. This is what turns
+    /// the slow cold start (a full re-parse of the whole log history every launch) into a near-
+    /// instant incremental one. Proven by rewriting the file to a DIFFERENT record while pinning
+    /// its mtime+size: the original record must come back (a re-parse would yield the new one).
+    /// The other cache tests use `storeURL: nil` (the default) and stay hermetic; only these opt in.
+    func testPersistentCacheReusesAcrossInstancesByFingerprint() throws {
+        let store = dir.appendingPathComponent("record-cache.json")
+        let url = try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
+        let pinned = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: pinned], ofItemAtPath: url.path)
+
+        let cold = RecordCache(storeURL: store)
+        XCTAssertEqual(cold.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.path), "the cold run flushed the cache to disk")
+
+        // Rewrite with a DIFFERENT record of identical byte length (same-length ids) and restore
+        // the mtime, so the fingerprint is byte-identical to what the cold run persisted.
+        try (assistantLine(id: "m2", req: "r2") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: pinned], ofItemAtPath: url.path)
+
+        let warm = RecordCache(storeURL: store)   // fresh instance → must hydrate from the store file
+        XCTAssertEqual(warm.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1"],
+                       "a new instance reused the persisted record for an unchanged fingerprint, not the file's new bytes")
+    }
+
+    /// Safety counterpart: a real change (different size) busts the persisted fingerprint, so a
+    /// fresh instance re-parses rather than serving stale records.
+    func testPersistentCacheReparsesWhenFingerprintChanges() throws {
+        let store = dir.appendingPathComponent("record-cache.json")
+        try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
+        _ = RecordCache(storeURL: store).records(for: LogReader.findJSONL(in: dir))   // persist m1
+
+        try write("s.jsonl", [assistantLine(id: "m1", req: "r1"), assistantLine(id: "m2", req: "r2")])
+
+        let warm = RecordCache(storeURL: store)
+        XCTAssertEqual(warm.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1", "m2"],
+                       "a changed fingerprint forces a re-parse, never a stale reuse")
+    }
+
+    /// A corrupt or wrong-version store file is ignored, not trusted: the cache falls back to a
+    /// clean parse (fail-soft, exactly as before persistence existed) and never throws.
+    func testPersistentCacheToleratesCorruptStore() throws {
+        let store = dir.appendingPathComponent("record-cache.json")
+        try "{ not the cache schema".write(to: store, atomically: true, encoding: .utf8)
+        try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
+
+        let cache = RecordCache(storeURL: store)
+        XCTAssertEqual(cache.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1"],
+                       "a corrupt store is discarded and the logs are parsed fresh")
+    }
 }

@@ -15,7 +15,10 @@ import Foundation
 // MARK: - Input record
 
 /// One assistant usage record, stripped to the fields we count. Never carries content.
-public struct UsageRecord: Sendable {
+/// `Codable` so the I/O shell's on-disk record cache can persist parsed records across
+/// launches — the only fields here are opaque ids, the model, token counts, a timestamp
+/// and the sidechain flag, so the cache, like the in-memory model, holds no prompt/code.
+public struct UsageRecord: Sendable, Codable {
     public var messageId: String?
     public var requestId: String?
     public var model: String
@@ -35,7 +38,7 @@ public struct UsageRecord: Sendable {
 }
 
 /// The four token classes the logs carry. cache_read usually dominates volume.
-public struct TokenUsage: Sendable {
+public struct TokenUsage: Sendable, Codable {
     public var input: Int
     public var cacheCreate: Int
     public var cacheRead: Int
