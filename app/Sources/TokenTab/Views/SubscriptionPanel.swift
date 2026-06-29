@@ -164,43 +164,39 @@ struct SubscriptionPanel: View {
 
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             VStack(alignment: .leading, spacing: 9) {
-                liveStatusRow
+                // When live is fresh, the header LIVE badge already confirms it and the runway
+                // attributes the reset to `claude /usage` — a third "live" marker here (over the
+                // trust line, so two green dots would stack) is pure noise. Show this row only
+                // when it has a job: to OFFER live (off) or flag it STALE.
+                if !(snapshot.live?.isFresh(now: now) ?? false) { liveSetupRow }
                 TrustFooter(text: "Local only — nothing leaves this Mac")
             }
             .padding(.vertical, 12)
         }
     }
 
-    /// Footer line that makes the live boundary legible: where the % comes from, whether
-    /// it's fresh — and, when it isn't, the exact command to turn it on. The app can't run
-    /// the sidecar itself (sandboxed, no network), so honesty here means handing over the
-    /// command, not hiding a button that could never work.
-    @ViewBuilder private var liveStatusRow: some View {
-        if let l = snapshot.live, l.isFresh(now: now) {
-            HStack(spacing: 6) {
-                GlowDot(color: Theme.green, size: 5, glow: 3)
-                Text("Live · claude /usage · \(liveAgo(l))")
-                    .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
-            }
-            .padding(.horizontal, 17)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
-                    HStack(spacing: 6) {
-                        Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
-                        Text(snapshot.live == nil ? "Live %: off" : "Live · stale")
-                            .font(.system(size: 10.5))
-                        Image(systemName: showLiveHelp ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 7, weight: .semibold))
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(Theme.faint).contentShape(Rectangle())
+    /// The live-setup affordance, shown only when live is OFF or STALE (gated at the call site).
+    /// Fresh live needs no row here — the header LIVE badge and the runway's "from claude /usage"
+    /// already carry it; repeating it was a third "live" marker in one panel. When it isn't fresh,
+    /// honesty means handing over the exact command (the sandboxed app can't run the sidecar),
+    /// not hiding a button that could never work.
+    private var liveSetupRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
+                    Text(snapshot.live == nil ? "Live %: off" : "Live · stale")
+                        .font(.system(size: 10.5))
+                    Image(systemName: showLiveHelp ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 7, weight: .semibold))
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                if showLiveHelp { liveHelp }
+                .foregroundStyle(Theme.faint).contentShape(Rectangle())
             }
-            .padding(.horizontal, 17)
+            .buttonStyle(.plain)
+            if showLiveHelp { liveHelp }
         }
+        .padding(.horizontal, 17)
     }
 
     private var liveHelp: some View {
@@ -249,12 +245,6 @@ struct SubscriptionPanel: View {
     private func copyCommand(_ s: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(s, forType: .string)
-    }
-
-    private func liveAgo(_ l: LiveUsage) -> String {
-        guard let c = l.capturedAt else { return "just now" }
-        let s = Int(now.timeIntervalSince(c))
-        return s < 60 ? "\(max(0, s))s ago" : "\(s / 60)m ago"
     }
 
     private func barRow(title: String, trailing: String, fraction: Double, color: Color) -> some View {
