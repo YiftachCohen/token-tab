@@ -81,7 +81,7 @@ struct HistoryPanel: View {
                 MiniSegmented(options: [("7d", 7), ("14d", 14), ("30d", 30)],
                               selection: $range, hPadding: 11)
             }
-            .padding(.horizontal, 18).padding(.top, 12)
+            .padding(.horizontal, 17).padding(.top, 12)
 
             // Period total + delta-vs-previous badge
             VStack(alignment: .leading, spacing: 0) {
@@ -95,7 +95,7 @@ struct HistoryPanel: View {
                 }
                 .padding(.top, 7)
             }
-            .padding(.horizontal, 18).padding(.top, 14)
+            .padding(.horizontal, 17).padding(.top, 14)
 
             // Daily bars + axis
             VStack(spacing: 6) {
@@ -121,10 +121,10 @@ struct HistoryPanel: View {
                     }
                 }
             }
-            .padding(.horizontal, 18).padding(.top, 12)
+            .padding(.horizontal, 17).padding(.top, 12)
 
             // AVG / DAY · BUSIEST MODEL
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 12)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 12)
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     SectionLabel(text: "AVG / DAY")
@@ -138,9 +138,9 @@ struct HistoryPanel: View {
                         .foregroundStyle(busiest?.color ?? Theme.muted)
                 }
             }
-            .padding(.horizontal, 18).padding(.top, 12)
+            .padding(.horizontal, 17).padding(.top, 12)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             TrustFooter(text: "Computed on-device · 0 network calls")
                 .padding(.vertical, 12)
         }

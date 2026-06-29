@@ -109,7 +109,7 @@ struct SubscriptionPanel: View {
                 .padding(.top, 6)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 18).padding(.top, 16)
+            .padding(.horizontal, 17).padding(.top, 16)
 
             // 5-hour session TIME bar — only when LIVE. In live mode the runway shows an absolute
             // reset time, so this progress bar adds the "how far through the window" view. With a
@@ -119,7 +119,7 @@ struct SubscriptionPanel: View {
                 barRow(title: "5-hour session",
                        trailing: w.active ? "\(Fmt.duration(w.secondsToReset(now: now))) left" : "window idle",
                        fraction: w.active ? max(0, 1 - timeLeft) : 0, color: Theme.green)
-                    .padding(.horizontal, 18).padding(.top, 14)
+                    .padding(.horizontal, 17).padding(.top, 14)
             }
 
             // Weekly limit — only the live reading knows this. Shown whenever live is fresh
@@ -128,7 +128,7 @@ struct SubscriptionPanel: View {
                 barRow(title: "This week (all models)",
                        trailing: "\(wk)% used",
                        fraction: Double(wk) / 100, color: Theme.green)
-                    .padding(.horizontal, 18).padding(.top, 12)
+                    .padding(.horizontal, 17).padding(.top, 12)
             }
 
             // Second stat: token cap bar when configured, else today/this-week + a way to
@@ -150,9 +150,9 @@ struct SubscriptionPanel: View {
                     }
                 }
             }
-            .padding(.horizontal, 18).padding(.top, 13)
+            .padding(.horizontal, 17).padding(.top, 13)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 16)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
 
             // SIDE METRIC: tokens today, demoted (Claude row; Codex hidden until its parser ships).
             VStack(alignment: .leading, spacing: 10) {
@@ -160,9 +160,9 @@ struct SubscriptionPanel: View {
                 AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit,
                          denominator: snapshot.agg.today)
             }
-            .padding(.horizontal, 18).padding(.top, 13)
+            .padding(.horizontal, 17).padding(.top, 13)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             VStack(alignment: .leading, spacing: 9) {
                 liveStatusRow
                 TrustFooter(text: "Local only — nothing leaves this Mac")
@@ -182,7 +182,7 @@ struct SubscriptionPanel: View {
                 Text("Live · claude /usage · \(liveAgo(l))")
                     .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 17)
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
@@ -199,7 +199,7 @@ struct SubscriptionPanel: View {
                 .buttonStyle(.plain)
                 if showLiveHelp { liveHelp }
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 17)
         }
     }
 
