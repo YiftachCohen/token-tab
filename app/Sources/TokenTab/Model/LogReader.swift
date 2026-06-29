@@ -139,36 +139,107 @@ enum LogReader {
 /// returned in `files` order, so the aggregator's first-seen dedup stays byte-identical
 /// to the uncached path.
 ///
+/// PERSISTENT across launches: the cache is hydrated from (and flushed to) a small file in
+/// the app's own Caches container, keyed by absolute path + mtime + size. Logs are append-
+/// only, so on a COLD launch only the files that changed since last run are re-parsed —
+/// turning a multi-second full re-parse of the whole history (the loading-screen wall) into
+/// a near-instant incremental one. Fail-soft throughout: a missing/corrupt/old-version store
+/// just falls back to parsing, never throws. The cached records are metadata only (see
+/// `UsageRecord`) — no prompt/code is ever written to disk.
+///
 /// `@unchecked Sendable`: the only mutation site is `UsageStore.refresh()`, serialized by
 /// its `isRefreshing` guard, so `records(for:)` calls never overlap.
 final class RecordCache: @unchecked Sendable {
     private struct Entry { let mtime: Date; let size: Int; let records: [UsageRecord]; let malformed: Int }
-    private var cache: [URL: Entry] = [:]
+    private var cache: [String: Entry] = [:]   // keyed by absolute file path
+
+    /// Bump when the parse output shape changes, so an old build's cache is ignored, not trusted.
+    private static let version = 1
+    private let storeURL: URL?
+    private var hydrated = false
+    private var dirty = false
+    private var lastPersist = Date.distantPast
+    private let persistInterval: TimeInterval = 30
+
+    /// On-disk shape. Path strings (not URLs) so key equality is exact across launches.
+    private struct PersistedEntry: Codable {
+        var path: String; var mtime: Date; var size: Int; var records: [UsageRecord]; var malformed: Int
+    }
+    private struct PersistedCache: Codable { var version: Int; var entries: [PersistedEntry] }
+
+    /// `storeURL == nil` disables persistence (the default — used by tests so they stay
+    /// hermetic). The app passes `defaultStoreURL()` to get cross-launch reuse.
+    init(storeURL: URL? = nil) { self.storeURL = storeURL }
+
+    /// The cache file inside the app container's Caches dir — writable in the sandbox with no
+    /// entitlement, and outside `~/.claude` so it never pollutes the log walk. nil if it can't
+    /// be located/created, in which case the cache stays in-memory (cold parse each launch).
+    static func defaultStoreURL() -> URL? {
+        let fm = FileManager.default
+        guard let caches = try? fm.url(for: .cachesDirectory, in: .userDomainMask,
+                                       appropriateFor: nil, create: true) else { return nil }
+        let dir = caches.appendingPathComponent("TokenTab", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("record-cache-v\(version).json")
+    }
 
     func records(for files: [URL]) -> (records: [UsageRecord], malformed: Int) {
+        hydrateIfNeeded()
         var records: [UsageRecord] = []
         var malformed = 0
-        var seen = Set<URL>(minimumCapacity: files.count)
+        var seen = Set<String>(minimumCapacity: files.count)
         for url in files {
-            seen.insert(url)
+            let path = url.path
+            seen.insert(path)
             let vals = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             let mtime = vals?.contentModificationDate ?? .distantPast
             let size = vals?.fileSize ?? -1
             // Hit: file unchanged since we parsed it (logs are append-only, so mtime+size
             // is a sound fingerprint). Reuse without touching disk.
-            if let e = cache[url], e.mtime == mtime, e.size == size {
+            if let e = cache[path], e.mtime == mtime, e.size == size {
                 records.append(contentsOf: e.records)
                 malformed += e.malformed
                 continue
             }
             let (r, m) = LogReader.parseFile(url)
-            cache[url] = Entry(mtime: mtime, size: size, records: r, malformed: m)
+            cache[path] = Entry(mtime: mtime, size: size, records: r, malformed: m)
+            dirty = true
             records.append(contentsOf: r)
             malformed += m
         }
         if cache.count > seen.count {           // drop vanished files so the cache stays bounded
             cache = cache.filter { seen.contains($0.key) }
+            dirty = true
         }
+        persistIfNeeded()
         return (records, malformed)
+    }
+
+    /// Load the persisted cache once, before the first parse. A missing/corrupt/old-version
+    /// file leaves the cache empty (full cold parse) — exactly the behavior before persistence.
+    private func hydrateIfNeeded() {
+        guard !hydrated else { return }
+        hydrated = true
+        guard let url = storeURL,
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(PersistedCache.self, from: data),
+              decoded.version == Self.version else { return }
+        for e in decoded.entries {
+            cache[e.path] = Entry(mtime: e.mtime, size: e.size, records: e.records, malformed: e.malformed)
+        }
+    }
+
+    /// Flush the cache when it changed, throttled so an active session's once-a-second
+    /// refreshes don't rewrite the whole file each time. A few-seconds-stale store is fine:
+    /// at worst the next launch re-parses the handful of files touched since the last flush.
+    private func persistIfNeeded() {
+        guard dirty, let url = storeURL, Date().timeIntervalSince(lastPersist) >= persistInterval else { return }
+        lastPersist = Date()
+        dirty = false
+        let entries = cache.map { PersistedEntry(path: $0.key, mtime: $0.value.mtime,
+                                                 size: $0.value.size, records: $0.value.records,
+                                                 malformed: $0.value.malformed) }
+        guard let data = try? JSONEncoder().encode(PersistedCache(version: Self.version, entries: entries)) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 }

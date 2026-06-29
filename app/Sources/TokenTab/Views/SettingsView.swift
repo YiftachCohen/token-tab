@@ -49,9 +49,9 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 modePicker
             }
-            .padding(.horizontal, 18).padding(.top, 14)
+            .padding(.horizontal, 17).padding(.top, 14)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
 
             // 5-HOUR TOKEN CAP — works in any mode; the subscription gauge reads it for a real %.
             VStack(alignment: .leading, spacing: 9) {
@@ -75,9 +75,9 @@ struct SettingsView: View {
                 Text(capStatus).font(.system(size: 10.5)).foregroundStyle(Theme.faint)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 18).padding(.top, 14)
+            .padding(.horizontal, 17).padding(.top, 14)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
 
             // LIVE SERVER % — the same hand-off the subscription panel offers, just always reachable.
             VStack(alignment: .leading, spacing: 9) {
@@ -97,11 +97,11 @@ struct SettingsView: View {
                     .font(.system(size: 10)).foregroundStyle(Theme.faint)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 18).padding(.top, 14)
+            .padding(.horizontal, 17).padding(.top, 14)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             TrustFooter(text: "Local only — nothing leaves this Mac")
-                .padding(.horizontal, 18).padding(.vertical, 12)
+                .padding(.horizontal, 17).padding(.vertical, 12)
         }
         .onAppear { capText = store.capOverride > 0 ? String(store.capOverride) : "" }
     }

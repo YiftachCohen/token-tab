@@ -44,8 +44,6 @@ struct SubscriptionPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PanelHeader(pill: headerPill)
-
             // HERO: the gauge holds the single "left" figure — a real quota % when we have a
             // cap, otherwise the time remaining. Color carries health only when it's quota.
             HStack(alignment: .top, spacing: 18) {
@@ -111,7 +109,7 @@ struct SubscriptionPanel: View {
                 .padding(.top, 6)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 18).padding(.top, 16)
+            .padding(.horizontal, 17).padding(.top, 16)
 
             // 5-hour session TIME bar — only when LIVE. In live mode the runway shows an absolute
             // reset time, so this progress bar adds the "how far through the window" view. With a
@@ -121,7 +119,7 @@ struct SubscriptionPanel: View {
                 barRow(title: "5-hour session",
                        trailing: w.active ? "\(Fmt.duration(w.secondsToReset(now: now))) left" : "window idle",
                        fraction: w.active ? max(0, 1 - timeLeft) : 0, color: Theme.green)
-                    .padding(.horizontal, 18).padding(.top, 14)
+                    .padding(.horizontal, 17).padding(.top, 14)
             }
 
             // Weekly limit — only the live reading knows this. Shown whenever live is fresh
@@ -130,7 +128,7 @@ struct SubscriptionPanel: View {
                 barRow(title: "This week (all models)",
                        trailing: "\(wk)% used",
                        fraction: Double(wk) / 100, color: Theme.green)
-                    .padding(.horizontal, 18).padding(.top, 12)
+                    .padding(.horizontal, 17).padding(.top, 12)
             }
 
             // Second stat: token cap bar when configured, else today/this-week + a way to
@@ -152,9 +150,9 @@ struct SubscriptionPanel: View {
                     }
                 }
             }
-            .padding(.horizontal, 18).padding(.top, 13)
+            .padding(.horizontal, 17).padding(.top, 12)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 16)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
 
             // SIDE METRIC: tokens today, demoted (Claude row; Codex hidden until its parser ships).
             VStack(alignment: .leading, spacing: 10) {
@@ -162,47 +160,43 @@ struct SubscriptionPanel: View {
                 AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit,
                          denominator: snapshot.agg.today)
             }
-            .padding(.horizontal, 18).padding(.top, 13)
+            .padding(.horizontal, 17).padding(.top, 12)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 18).padding(.top, 14)
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             VStack(alignment: .leading, spacing: 9) {
-                liveStatusRow
+                // When live is fresh, the header LIVE badge already confirms it and the runway
+                // attributes the reset to `claude /usage` — a third "live" marker here (over the
+                // trust line, so two green dots would stack) is pure noise. Show this row only
+                // when it has a job: to OFFER live (off) or flag it STALE.
+                if !(snapshot.live?.isFresh(now: now) ?? false) { liveSetupRow }
                 TrustFooter(text: "Local only — nothing leaves this Mac")
             }
             .padding(.vertical, 12)
         }
     }
 
-    /// Footer line that makes the live boundary legible: where the % comes from, whether
-    /// it's fresh — and, when it isn't, the exact command to turn it on. The app can't run
-    /// the sidecar itself (sandboxed, no network), so honesty here means handing over the
-    /// command, not hiding a button that could never work.
-    @ViewBuilder private var liveStatusRow: some View {
-        if let l = snapshot.live, l.isFresh(now: now) {
-            HStack(spacing: 6) {
-                GlowDot(color: Theme.green, size: 5, glow: 3)
-                Text("Live · claude /usage · \(liveAgo(l))")
-                    .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
-            }
-            .padding(.horizontal, 18)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
-                    HStack(spacing: 6) {
-                        Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
-                        Text(snapshot.live == nil ? "Live %: off" : "Live · stale")
-                            .font(.system(size: 10.5))
-                        Image(systemName: showLiveHelp ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 7, weight: .semibold))
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(Theme.faint).contentShape(Rectangle())
+    /// The live-setup affordance, shown only when live is OFF or STALE (gated at the call site).
+    /// Fresh live needs no row here — the header LIVE badge and the runway's "from claude /usage"
+    /// already carry it; repeating it was a third "live" marker in one panel. When it isn't fresh,
+    /// honesty means handing over the exact command (the sandboxed app can't run the sidecar),
+    /// not hiding a button that could never work.
+    private var liveSetupRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
+                    Text(snapshot.live == nil ? "Live %: off" : "Live · stale")
+                        .font(.system(size: 10.5))
+                    Image(systemName: showLiveHelp ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 7, weight: .semibold))
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                if showLiveHelp { liveHelp }
+                .foregroundStyle(Theme.faint).contentShape(Rectangle())
             }
-            .padding(.horizontal, 18)
+            .buttonStyle(.plain)
+            if showLiveHelp { liveHelp }
         }
+        .padding(.horizontal, 17)
     }
 
     private var liveHelp: some View {
@@ -251,27 +245,6 @@ struct SubscriptionPanel: View {
     private func copyCommand(_ s: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(s, forType: .string)
-    }
-
-    private func liveAgo(_ l: LiveUsage) -> String {
-        guard let c = l.capturedAt else { return "just now" }
-        let s = Int(now.timeIntervalSince(c))
-        return s < 60 ? "\(max(0, s))s ago" : "\(s / 60)m ago"
-    }
-
-    /// Header badge: a pulsing LIVE dot when the % is from a fresh `claude /usage` reading,
-    /// then the plan pill. The dot is the at-a-glance "these numbers are authoritative" cue.
-    @ViewBuilder private var headerPill: some View {
-        HStack(spacing: 7) {
-            if isLive {
-                HStack(spacing: 4) {
-                    GlowDot(color: Theme.green, size: 5, glow: 3)
-                    Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)
-                        .foregroundStyle(Theme.green)
-                }
-            }
-            Pill(text: "CLAUDE MAX", tint: Theme.green)
-        }
     }
 
     private func barRow(title: String, trailing: String, fraction: Double, color: Color) -> some View {
