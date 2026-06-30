@@ -20,7 +20,8 @@ let package = Package(
         .target(name: "TokenTabCore"),
         .executableTarget(
             name: "TokenTab",
-            dependencies: ["TokenTabCore"]
+            dependencies: ["TokenTabCore"],
+            resources: [.copy("Resources/Fonts")]   // Martian Mono (OFL) — the hero numeric face
         ),
         .testTarget(
             name: "TokenTabCoreTests",

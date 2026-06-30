@@ -1,10 +1,10 @@
 // Token Tab — Mode A · Subscription (Claude Max/Pro).
 //
-// On a subscription the question is "how much have I got left?", so RUNWAY leads.
-// The gauge holds the single "left" figure, and a "% left" means QUOTA, never the clock:
-// a real token % appears only when a cap is configured (we never invent one). With no cap
-// the same ring instead counts down the window's TIME — labeled as time, not usage — and
-// offers an inline field to set the cap locally (UserDefaults), which flips it to a real %.
+// On a subscription the question is "how much have I got left?", so RUNWAY leads. The gauge
+// is the centered hero; the runway sits beneath it, then the interpretation line. A "% left"
+// means QUOTA, never the clock: a real token % appears only when a cap is configured (we
+// never invent one). With no cap the same ring counts down the window's TIME — labeled as
+// time, not usage — and offers an inline field to set the cap locally (UserDefaults).
 
 import SwiftUI
 import AppKit
@@ -17,6 +17,7 @@ struct SubscriptionPanel: View {
     @State private var editingCap = false
     @State private var capText = ""
     @State private var showLiveHelp = false
+    @State private var beat = false          // open-beat: sweep the ring from 0 on appear
     @FocusState private var capFocused: Bool
 
     private var snapshot: Snapshot { store.snapshot }
@@ -34,6 +35,24 @@ struct SubscriptionPanel: View {
     /// The ring's fill: quota-left when we have it, else the time countdown.
     private var heroFraction: Double { hasQuota ? Double(quotaLeft ?? 0) / 100 : timeLeft }
 
+    /// The "easy" line: a plain-language read on whether the current burn clears the window.
+    /// Honest by construction — only when there's a real quota basis (a cap) and an active
+    /// window, so it never dresses the clock up as a usage forecast. `warn` flips it amber.
+    private var paceLine: (text: String, warn: Bool)? {
+        guard w.active, w.cap > 0, let secs = w.secondsToReset(now: now), secs > 0 else { return nil }
+        let left = max(0, w.cap - w.tokens)
+        let rate = snapshot.agg.lastHourTokens        // last hour's tokens ≈ tokens / hour
+        if rate <= 0 {
+            return left > 0 ? ("At this pace, you're clear until reset", false) : nil
+        }
+        let projected = Double(rate) * (secs / 3600)
+        if projected <= Double(left) {
+            return ("At this pace, you're clear until reset", false)
+        }
+        let secsToCap = Double(left) / Double(rate) * 3600
+        return ("Heavy pace — ~\(Fmt.duration(secsToCap)) of headroom left", true)
+    }
+
     /// The authoritative session reset from live, parenthetical timezone stripped for width
     /// ("12:29am (Europe/Rome)" → "12:29am"). nil when live carries no reset text.
     private var liveResetText: String? {
@@ -44,142 +63,212 @@ struct SubscriptionPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // HERO: the gauge holds the single "left" figure — a real quota % when we have a
-            // cap, otherwise the time remaining. Color carries health only when it's quota.
-            HStack(alignment: .top, spacing: 18) {
-                RingGauge(fraction: heroFraction, size: 104, lineWidth: 10,
+            // HERO — the gauge is the centered hero; the runway sits beneath it, then the
+            // interpretation line. The center figure is a real quota % (live or cap), else the
+            // window's time countdown; color carries health only when it's a quota.
+            VStack(spacing: 0) {
+                RingGauge(fraction: beat ? heroFraction : 0, size: 134, lineWidth: 12,
                           color: hasQuota ? snapshot.health.color : Theme.green) {
-                    VStack(spacing: 0) {
+                    VStack(spacing: 1) {
                         if let pct = quotaLeft {
                             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                                Text("\(pct)").font(Theme.figure(31, weight: .semibold))
-                                    .tracking(Theme.tightTracking(31))
-                                Text("%").font(Theme.figure(17)).foregroundStyle(Theme.faint)
+                                AnimatedNumber(target: Double(pct),
+                                               font: Theme.hero(34, weight: .semibold),
+                                               tracking: Theme.tightTracking(34),
+                                               color: Theme.ink) { "\(Int($0.rounded()))" }
+                                Text("%").font(Theme.figure(18)).foregroundStyle(Theme.faint)
                             }
-                            Text("left").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                            heroCaption("left")
                         } else if w.active {
                             Text(Fmt.durationCompact(w.secondsToReset(now: now)))
-                                .font(Theme.figure(24, weight: .semibold))
-                                .tracking(Theme.tightTracking(24))
-                            Text("left").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                                .font(Theme.hero(26, weight: .semibold))
+                                .tracking(Theme.tightTracking(26))
+                                .foregroundStyle(Theme.ink)
+                            heroCaption("left")
                         } else {
                             Text("idle").font(Theme.figure(20, weight: .semibold))
                                 .foregroundStyle(Theme.muted)
                         }
                     }
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    SectionLabel(text: "RUNWAY")
-                    if isLive {
-                        // Live: show the authoritative reset, not our local heuristic clock.
-                        Text(liveResetText.map { "resets \($0)" } ?? "live")
-                            .font(Theme.figure(19, weight: .semibold))
-                            .foregroundStyle(Theme.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("this session · from claude /usage")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else if hasQuota {
-                        // Cap-based %: our local window countdown is the supporting fact.
-                        Text(w.active ? Fmt.duration(w.secondsToReset(now: now)) : "idle")
-                            .font(Theme.figure(30, weight: .bold))
-                            .tracking(Theme.tightTracking(30))
-                            .foregroundStyle(Theme.ink)
-                        Text(w.active
-                             ? "left in this 5-hour\nwindow · resets \(Fmt.clock(w.resetAt))"
-                             : "no active window")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        // Time-only: the ring already holds the duration. Be explicit that
-                        // this is the clock, not usage, and point at how to get a real %.
-                        Text(w.active ? "resets \(Fmt.clock(w.resetAt))" : "no active window")
-                            .font(Theme.figure(19, weight: .semibold))
-                            .foregroundStyle(Theme.ink)
-                        Text(w.active
-                             ? "time left in this 5-hour\nwindow — not usage"
-                             : "open Claude Code to start one")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                .padding(.top, 2)
+
+                runwayBelow
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 11)
+
+                if let pace = paceLine {
+                    Text(pace.text)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(pace.warn ? Theme.amber : Theme.green)
+                        .padding(.vertical, 4).padding(.horizontal, 10)
+                        .background((pace.warn ? Theme.amber : Theme.green).opacity(0.16), in: Capsule())
+                        .padding(.top, 10)
                 }
-                .padding(.top, 6)
-                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 17).padding(.top, 16)
 
-            // 5-hour session TIME bar — only when LIVE. In live mode the runway shows an absolute
-            // reset time, so this progress bar adds the "how far through the window" view. With a
-            // cap or in time-only mode the runway headline (or the ring) already states the
-            // window's countdown, so the bar would just echo it — hide it there.
-            if isLive {
-                barRow(title: "5-hour session",
-                       trailing: w.active ? "\(Fmt.duration(w.secondsToReset(now: now))) left" : "window idle",
-                       fraction: w.active ? max(0, 1 - timeLeft) : 0, color: Theme.green)
-                    .padding(.horizontal, 17).padding(.top, 14)
-            }
-
-            // Weekly limit — only the live reading knows this. Shown whenever live is fresh
-            // and carries a weekly %, independent of the session headline's source.
-            if let l = snapshot.live, l.isFresh(now: now), let wk = l.weeklyPct {
-                barRow(title: "This week (all models)",
-                       trailing: "\(wk)% used",
-                       fraction: Double(wk) / 100, color: Theme.green)
-                    .padding(.horizontal, 17).padding(.top, 12)
-            }
-
-            // Second stat: token cap bar when configured, else today/this-week + a way to
-            // set the cap so the gauge above can show a real %.
-            Group {
-                if w.cap > 0 {
-                    barRow(title: "Window tokens",
-                           trailing: "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))",
-                           fraction: Double(w.tokens) / Double(w.cap), color: Theme.green)
-                } else {
-                    VStack(spacing: 11) {
-                        HStack {
-                            twoUp("Today", Fmt.abbrev(snapshot.agg.today))
-                            Spacer()
-                            twoUp("This week", Fmt.abbrev(snapshot.agg.thisWeek))
-                        }
-                        // Only invite a cap when there's no % at all — never under a live %.
-                        if !hasQuota { capEditor }
-                    }
+            // 5-HOUR SESSION — the rate-limit window: tokens used (vs cap when set) and the
+            // current burn rate. Shown only with an active window; the runway covers the rest.
+            if w.active {
+                Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
+                VStack(alignment: .leading, spacing: 7) {
+                    SectionLabel(text: "5-HOUR SESSION")
+                    statRow("Tokens used",
+                            w.cap > 0 ? "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))" : Fmt.abbrev(w.tokens),
+                            color: Theme.ink)
+                    statRow("Trend", "+\(Fmt.abbrev(snapshot.agg.lastHourTokens)) / hr", color: Theme.green)
                 }
+                .padding(.horizontal, 17).padding(.top, 12)
+            }
+
+            // Two-up — this week (a live % when we have it, else tokens) and all-time tokens.
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
+            HStack(alignment: .top, spacing: 12) {
+                weekCell
+                Spacer()
+                twoUp("All time", Fmt.abbrev(snapshot.agg.total))
             }
             .padding(.horizontal, 17).padding(.top, 12)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
-
-            // SIDE METRIC: tokens today, demoted (Claude row; Codex hidden until its parser ships).
-            VStack(alignment: .leading, spacing: 10) {
-                SectionLabel(text: "TODAY · \(Fmt.abbrev(snapshot.agg.today)) TOKENS")
-                AgentRow(name: "Claude", color: Theme.green, split: snapshot.agg.todaySplit,
-                         denominator: snapshot.agg.today)
+            // Time-only: invite a local cap so the ring can show a real %.
+            if !hasQuota && w.cap == 0 {
+                capEditor.padding(.horizontal, 17).padding(.top, 12)
             }
-            .padding(.horizontal, 17).padding(.top, 12)
 
+            // TODAY · by model — the day's per-model token receipt (replaces the single agent row).
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             VStack(alignment: .leading, spacing: 9) {
-                // When live is fresh, the header LIVE badge already confirms it and the runway
-                // attributes the reset to `claude /usage` — a third "live" marker here (over the
-                // trust line, so two green dots would stack) is pure noise. Show this row only
-                // when it has a job: to OFFER live (off) or flag it STALE.
-                if !(snapshot.live?.isFresh(now: now) ?? false) { liveSetupRow }
-                TrustFooter(text: "Local only — nothing leaves this Mac")
+                SectionLabel(text: "TODAY · \(Fmt.abbrev(snapshot.agg.today)) · BY MODEL")
+                todayByModelRows
             }
-            .padding(.vertical, 12)
+            .padding(.horizontal, 17).padding(.top, 12)
+
+            // Live-setup row only when live is OFF or STALE; the trust line now lives in the
+            // shared footer (DropdownView), so the panel just ends here when live is fresh.
+            if !(snapshot.live?.isFresh(now: now) ?? false) {
+                Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
+                liveSetupRow.padding(.vertical, 12)
+            }
+        }
+        .padding(.bottom, 10)
+        .onAppear { beat = true }
+    }
+
+    // MARK: hero pieces
+
+    private func heroCaption(_ s: String) -> some View {
+        Text(s).font(.system(size: 9, weight: .semibold)).tracking(1.2)
+            .foregroundStyle(Theme.faint).textCase(.uppercase)
+    }
+
+    /// The runway line(s) under the gauge, centered, per state: live shows the authoritative
+    /// reset, cap shows the big duration, time-only is explicit that it's the clock not usage.
+    @ViewBuilder private var runwayBelow: some View {
+        if isLive {
+            VStack(spacing: 3) {
+                Text(liveResetText.map { "resets \($0)" } ?? "live")
+                    .font(Theme.figure(17, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("this session · from claude /usage")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if hasQuota {
+            VStack(spacing: 3) {
+                Text(w.active ? Fmt.duration(w.secondsToReset(now: now)) : "idle")
+                    .font(Theme.hero(21, weight: .semibold)).tracking(Theme.tightTracking(21))
+                    .foregroundStyle(Theme.ink)
+                Text(w.active ? "until reset · \(Fmt.clock(w.resetAt))" : "no active window")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+            }
+        } else {
+            VStack(spacing: 3) {
+                Text(w.active ? "resets \(Fmt.clock(w.resetAt))" : "no active window")
+                    .font(Theme.figure(16, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(w.active ? "time left in this 5-hour window — not usage"
+                              : "open Claude Code to start one")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
+    // MARK: middle stats
+
+    private func statRow(_ label: String, _ value: String, color: Color) -> some View {
+        HStack {
+            Text(label).font(.system(size: 12)).foregroundStyle(Theme.ink.opacity(0.85))
+            Spacer()
+            Text(value).font(Theme.figure(12.5, weight: .semibold)).foregroundStyle(color)
+        }
+    }
+
+    @ViewBuilder private var weekCell: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("This week").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            if let l = snapshot.live, l.isFresh(now: now), let wk = l.weeklyPct {
+                Text("\(wk)%").font(Theme.figure(15, weight: .semibold)).foregroundStyle(Theme.ink)
+                MiniBar(fraction: Double(wk) / 100, color: Theme.green, height: 4).frame(width: 116)
+            } else {
+                Text(Fmt.abbrev(snapshot.agg.thisWeek))
+                    .font(Theme.figure(15, weight: .semibold)).foregroundStyle(Theme.ink)
+            }
+        }
+    }
+
+    // MARK: today · by model
+
+    private struct ModelTok: Identifiable { let id = UUID(); let name: String; let tokens: Int; let color: Color }
+
+    /// The day's per-model token receipt, from the History series' last (today) bucket — sorted
+    /// by tokens. Reuses already-computed per-day maps, so Core stays untouched.
+    private var todayByModelList: [ModelTok] {
+        guard let today = snapshot.history.last else { return [] }
+        return today.tokensByModel.filter { $0.value > 0 }.sorted { $0.value > $1.value }.enumerated().map { i, kv in
+            ModelTok(name: prettyModel(kv.key), tokens: kv.value, color: subModelColor(kv.key, rank: i))
+        }
+    }
+
+    /// Real model id → display name, but fold the parser's placeholder ids (`<synthetic>` /
+    /// `<unknown>` / empty) into a clean "Other" so they never render raw in the receipt.
+    private func prettyModel(_ base: String) -> String {
+        let id = base.lowercased()
+        if base.isEmpty || id == "<synthetic>" || id == "<unknown>" { return "Other" }
+        return Fmt.modelName(base)
+    }
+
+    /// Stay in the green world: Claude tiers ramp green (top = brightest), Haiku slate, Codex indigo.
+    private func subModelColor(_ base: String, rank: Int) -> Color {
+        let id = base.lowercased()
+        if id.contains("codex") || id.contains("gpt") || id.contains("fable") { return Theme.indigo }
+        if id.contains("haiku") { return Theme.slate }
+        return rank == 0 ? Theme.green : Theme.green.opacity(0.6)
+    }
+
+    @ViewBuilder private var todayByModelRows: some View {
+        let rows = Array(todayByModelList.prefix(4))
+        if rows.isEmpty {
+            Text("No usage yet today").font(.system(size: 11)).foregroundStyle(Theme.faint)
+        } else {
+            ForEach(rows) { m in
+                HStack(spacing: 9) {
+                    Circle().fill(m.color).frame(width: 7, height: 7)
+                    Text(m.name).font(.system(size: 12)).foregroundStyle(Theme.ink)
+                    Spacer(minLength: 8)
+                    Text(Fmt.abbrev(m.tokens)).font(Theme.figure(12, weight: .regular))
+                        .foregroundStyle(Theme.muted).frame(width: 54, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    // MARK: live setup (unchanged)
+
     /// The live-setup affordance, shown only when live is OFF or STALE (gated at the call site).
-    /// Fresh live needs no row here — the header LIVE badge and the runway's "from claude /usage"
-    /// already carry it; repeating it was a third "live" marker in one panel. When it isn't fresh,
-    /// honesty means handing over the exact command (the sandboxed app can't run the sidecar),
-    /// not hiding a button that could never work.
+    /// When it isn't fresh, honesty means handing over the exact command (the sandboxed app
+    /// can't run the sidecar), not hiding a button that could never work.
     private var liveSetupRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
@@ -216,8 +305,8 @@ struct SubscriptionPanel: View {
     }
 
     /// Absolute, cwd-independent commands when we can locate the repo's `adapters/` — so the
-    /// copied command runs from any directory. The chip still SHOWS the short relative form
-    /// (readable); only the copied string is the full path. Falls back to relative if unknown.
+    /// copied command runs from any directory. The chip still SHOWS the short relative form;
+    /// only the copied string is the full path. Falls back to relative if unknown.
     private var adaptersDir: URL? { Config.adaptersDir() }
     private var installCopy: String {
         adaptersDir.map { shellQuoted($0.appendingPathComponent("install-live.sh")) } ?? "adapters/install-live.sh"
@@ -247,21 +336,8 @@ struct SubscriptionPanel: View {
         NSPasteboard.general.setString(s, forType: .string)
     }
 
-    private func barRow(title: String, trailing: String, fraction: Double, color: Color) -> some View {
-        VStack(spacing: 6) {
-            HStack {
-                Text(title).font(.system(size: 11)).foregroundStyle(Theme.muted)
-                Spacer()
-                // The value is what the user came to read; it must not be dimmer than its
-                // label. `muted` (not `faint`) keeps it legible and above the AA contrast floor.
-                Text(trailing).font(Theme.figure(11, weight: .regular)).foregroundStyle(Theme.muted)
-            }
-            MiniBar(fraction: fraction, color: color)
-        }
-    }
-
     private func twoUp(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .trailing, spacing: 3) {
             Text(label).font(.system(size: 11)).foregroundStyle(Theme.muted)
             Text(value).font(Theme.figure(15, weight: .semibold)).foregroundStyle(Theme.ink)
         }
@@ -309,38 +385,5 @@ struct SubscriptionPanel: View {
     private func commitCap() {
         store.capOverride = Int(capText.filter(\.isNumber)) ?? 0
         editingCap = false
-    }
-}
-
-/// One agent's token usage with a main/sub split bar (design's "solid main · faded sub").
-struct AgentRow: View {
-    var name: String
-    var color: Color
-    var split: MainSubSplit
-    /// The section total (sum across agents) so each row's bar shows that agent's SHARE of the
-    /// day, comparable across rows — rather than self-normalising to a full bar that conveys no
-    /// magnitude. With a single agent the denominator equals the row's own total, so the bar
-    /// reads full exactly as before; once a second agent appears the bars become proportional.
-    var denominator: Int
-
-    private var mainFrac: Double {
-        denominator > 0 ? Double(split.mainTokens) / Double(denominator) : 0
-    }
-    private var subFrac: Double {
-        denominator > 0 ? Double(split.subTokens) / Double(denominator) : 0
-    }
-
-    var body: some View {
-        HStack(spacing: 9) {
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 7, height: 7)
-            Text(name).font(.system(size: 12)).foregroundStyle(Theme.ink)
-            Spacer(minLength: 8)
-            MiniBar(fraction: mainFrac, subFraction: subFrac, color: color, height: 5)
-                .frame(width: 74)
-            Text(Fmt.abbrev(split.total))
-                .font(Theme.figure(11, weight: .regular))
-                .foregroundStyle(Theme.faint)
-                .frame(width: 40, alignment: .trailing)
-        }
     }
 }

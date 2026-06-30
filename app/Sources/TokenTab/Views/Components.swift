@@ -26,7 +26,9 @@ struct BrandMark: View {
     }
 }
 
-/// Large progress ring with arbitrary center content (the subscription runway hero).
+/// Large progress ring with arbitrary center content (the subscription runway hero). A lit
+/// cap rides the arc's endpoint so the gauge reads jewel-like (a precision instrument), not a
+/// flat progress bar.
 struct RingGauge<Center: View>: View {
     var fraction: Double
     var size: CGFloat
@@ -34,17 +36,33 @@ struct RingGauge<Center: View>: View {
     var color: Color
     @ViewBuilder var center: () -> Center
 
+    private var f: Double { max(0.001, min(1, fraction)) }
+
     var body: some View {
+        // Inset both circles by half the stroke so the ring's centerline sits at a known
+        // radius — the glow dot then shares that exact radius and can't drift off the arc.
+        let inset = lineWidth / 2
+        let radius = size / 2 - inset
         ZStack {
-            Circle().stroke(Theme.track, lineWidth: lineWidth)
+            Circle().stroke(Theme.track, lineWidth: lineWidth).padding(inset)
             Circle()
-                .trim(from: 0, to: max(0.001, min(1, fraction)))
+                .trim(from: 0, to: f)
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.5), value: fraction)
+                .padding(inset)
+            // The glowing endpoint — offset to the top of the ring, then rotated to the arc's
+            // tip, so it lands exactly on the round cap rather than beside it.
+            Circle()
+                .fill(color)
+                .frame(width: lineWidth, height: lineWidth)
+                .shadow(color: color.opacity(0.9), radius: lineWidth * 0.5)
+                .offset(y: -radius)
+                .rotationEffect(.degrees(f * 360))
+                .opacity(fraction > 0.02 ? 1 : 0)
             center()
         }
         .frame(width: size, height: size)
+        .animation(.easeOut(duration: OpenBeat.duration), value: fraction)
     }
 }
 

@@ -23,6 +23,12 @@ echo "▸ Assembling bundle…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$BIN_NAME"
+# The bundled hero font (Martian Mono, OFL). SwiftPM's Bundle.module layout doesn't fit an
+# .app, so ship the raw asset under Resources/Fonts and let FontLoader find it via
+# Bundle.main inside the sandboxed app (see FontLoader.swift).
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp "$HERE/Sources/TokenTab/Resources/Fonts/MartianMono.ttf" "$APP/Contents/Resources/Fonts/"
+cp "$HERE/Sources/TokenTab/Resources/Fonts/OFL.txt"         "$APP/Contents/Resources/Fonts/"
 cp "$HERE/Bundle/Info.plist" "$APP/Contents/Info.plist"
 # App icon (a gitignored build artifact) — generate from the gauge design if absent.
 [ -f "$HERE/Bundle/AppIcon.icns" ] || { echo "▸ Generating AppIcon.icns…"; bash "$HERE/Scripts/make-icon.sh"; }

@@ -12,7 +12,9 @@ enum Theme {
     // Brand accents (brighter in dark, per the design's light/dark pairs).
     static let green  = dynamic(light: 0x2E9E63, dark: 0x36C98A)
     static let indigo = dynamic(light: 0x5B62D6, dark: 0x7C83F0)   // Codex
-    static let amber  = dynamic(light: 0xB06A1F, dark: 0xD6A45A)
+    // Brighter than the old brown amber so "the meter is running" reads as cost energy
+    // (design refinement, 2026-06-30) — still short of neon.
+    static let amber  = dynamic(light: 0xC2740F, dark: 0xF5B44D)
     static let red    = dynamic(light: 0xD65745, dark: 0xE06A55)
     /// The History chart's "today" bar — a lighter, more legible amber than the text `amber`
     /// (design's `--amberBar`). Also the busiest-model accent when Opus leads on cost.
@@ -57,6 +59,13 @@ enum Theme {
     }
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
+    }
+    /// The hero numeric face — Martian Mono, bundled and registered at launch (see
+    /// FontLoader). It reads as a *measurement*, not the OS. Martian Mono is monospaced by
+    /// design, so its digits are already tabular. If the font ever fails to register,
+    /// `Font.custom` falls back to the system face, so call sites stay safe.
+    static func hero(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .custom("Martian Mono", size: size).weight(weight)
     }
     /// Optical tracking for big figures (design uses ≈ -.02em); points scale with size.
     static func tightTracking(_ size: CGFloat) -> CGFloat { -size * 0.02 }
