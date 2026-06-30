@@ -302,7 +302,7 @@ final class CoreTests: XCTestCase {
                                   model: "claude-opus-4-8", usage: u(10, 20, 30, 5),
                                   timestamp: "2026-06-20T12:00:00Z")],
                              days: 3, now: now, costModel: Pricing())
-        let expected: Double = (10.0 * 5 + 20.0 * 6.25 + 30.0 * 0.5 + 5.0 * 25) / 1_000_000
+        let expected: Double = (10.0 * 5.0 + 20.0 * 6.25 + 30.0 * 0.5 + 5.0 * 25.0) / 1_000_000.0
         XCTAssertEqual(h.last?.cost ?? -1, expected, accuracy: 1e-12)
         XCTAssertEqual(h.last?.tokensByModel["claude-opus-4-8"], 65)
         XCTAssertEqual(h.last?.costByModel["claude-opus-4-8"] ?? -1, expected, accuracy: 1e-12)

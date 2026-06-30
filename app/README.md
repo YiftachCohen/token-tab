@@ -68,7 +68,7 @@ packs the `.iconset` into `Bundle/AppIcon.icns` with `iconutil`.
 `AppIcon.icns` is a **build artifact** (gitignored). `build-app.sh` copies it into the
 bundle and regenerates it on demand if it's missing, and `Info.plist` points at it via
 `CFBundleIconFile`. The shared vector sources and web assets (favicon, wordmark) live in
-[`Branding/`](Branding) — see the repo README's *Branding* section.
+[`Branding/`](Branding/README.md), with the palette and regen commands.
 
 ## The two-minute audit (native build)
 
