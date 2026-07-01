@@ -27,6 +27,10 @@ public struct Pricing: CostModel {
         "claude-opus-4-8": Rate(input: 5, output: 25),
         "claude-opus-4-7": Rate(input: 5, output: 25),
         "claude-opus-4-6": Rate(input: 5, output: 25),
+        // Sonnet 5 list price. Anthropic is running a $2/$10 introductory rate through
+        // 2026-08-31, but the table isn't date-aware and documents itself as list pricing —
+        // the intro discount would silently go stale on 2026-09-01. (Same as Sonnet 4.6.)
+        "claude-sonnet-5": Rate(input: 3, output: 15),
         "claude-sonnet-4-6": Rate(input: 3, output: 15),
         "claude-haiku-4-5": Rate(input: 1, output: 5),
         // Older, still-billable models.
@@ -40,7 +44,7 @@ public struct Pricing: CostModel {
 
     private static let aliases: [String: String] = [
         "opus": "claude-opus-4-8",
-        "sonnet": "claude-sonnet-4-6",
+        "sonnet": "claude-sonnet-5",
         "haiku": "claude-haiku-4-5",
     ]
 

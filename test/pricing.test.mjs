@@ -58,7 +58,14 @@ test("dated snapshot suffix is stripped (haiku-4-5-20251001 -> haiku-4-5)", () =
 });
 
 test("bare family aliases resolve to the current model in that family", () => {
-  assert.equal(costOfUsage(oneMillion.output, "sonnet").usd, 15); // -> sonnet-4-6
+  assert.equal(costOfUsage(oneMillion.output, "sonnet").usd, 15); // -> sonnet-5
+});
+
+test("Sonnet 5 is priced at the $3/$15 list rate (intro discount not modeled)", () => {
+  assert.equal(costOfUsage(oneMillion.input, "claude-sonnet-5").usd, 3);
+  assert.equal(costOfUsage(oneMillion.output, "claude-sonnet-5").usd, 15);
+  // "sonnet" now aliases to Sonnet 5, so canonicalization + alias agree.
+  assert.equal(canonicalModelId("claude-sonnet-5"), "claude-sonnet-5");
 });
 
 test("older still-billable models are priced (Opus 4.1 higher tier, Opus/Sonnet 4.5, Haiku 3.5)", () => {

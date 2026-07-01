@@ -34,6 +34,10 @@ const RATES = {
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
   "claude-opus-4-6": { input: 5, output: 25 },
+  // Sonnet 5 list price. Anthropic is running a $2/$10 introductory rate through
+  // 2026-08-31, but the table isn't date-aware and documents itself as list pricing —
+  // the intro discount would silently go stale on 2026-09-01. (Same as Sonnet 4.6.)
+  "claude-sonnet-5": { input: 3, output: 15 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
   "claude-haiku-4-5": { input: 1, output: 5 },
   // Older, still-billable models. canonicalModelId reduces dated/Bedrock ids to these keys
@@ -50,7 +54,7 @@ const RATES = {
 // model in that family. This is the same family→latest mapping the official tooling uses.
 const ALIASES = {
   opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-4-6",
+  sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 };
 

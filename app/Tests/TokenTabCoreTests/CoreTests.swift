@@ -214,6 +214,15 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(usd, expected, accuracy: 1e-12)
     }
 
+    func testPricingSonnet5() {
+        // sonnet-5: $3/$15 list rate (intro discount not modeled). "sonnet" aliases to it.
+        let direct = Pricing().cost(u(1_000_000, 0, 0, 1_000_000), model: "claude-sonnet-5")
+        XCTAssertTrue(direct.priced)
+        XCTAssertEqual(direct.usd, 18, accuracy: 1e-12) // 3 input + 15 output
+        let alias = Pricing().cost(u(0, 0, 0, 1_000_000), model: "sonnet")
+        XCTAssertEqual(alias.usd, 15, accuracy: 1e-12)
+    }
+
     func testPricingUnknownUnpriced() {
         let (usd, priced) = Pricing().cost(u(10, 0, 0, 5), model: "gpt-5.5")
         XCTAssertFalse(priced)
