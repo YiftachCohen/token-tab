@@ -15,6 +15,7 @@ struct TokenTabApp: App {
 
     init() {
         Probe.runIfRequested()   // `--probe`: print the aggregate JSON and exit, no UI.
+        FontLoader.registerBundledFonts()   // hero figures use bundled Martian Mono (Theme.hero)
         // Make it a menu-bar-only agent even via `swift run` (no Info.plist there).
         NSApplication.shared.setActivationPolicy(.accessory)
         let access = AccessManager()

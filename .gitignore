@@ -36,3 +36,4 @@ xcuserdata/
 
 # Conductor workspace scratch (also excluded locally via .git/info/exclude)
 .context/
+.gstack/

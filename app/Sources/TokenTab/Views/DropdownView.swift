@@ -78,7 +78,7 @@ struct DropdownView: View {
                         .padding(.horizontal, 17).padding(.top, 12)
                     tabBody(now: ctx.date)
                 }
-                actionRow
+                footer
             }
         }
     }
@@ -89,7 +89,7 @@ struct DropdownView: View {
         case .overview:
             switch store.snapshot.mode {
             case .subscription: SubscriptionPanel(store: store, now: now)
-            case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric)
+            case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric, now: now)
             }
         case .history:
             HistoryPanel(snapshot: store.snapshot, mode: store.snapshot.mode)
@@ -117,23 +117,46 @@ struct DropdownView: View {
         }
     }
 
-    private var actionRow: some View {
-        HStack {
-            Text(store.hasLoadedOnce ? "updated \(updatedAgo(store.snapshot.lastUpdated)) · \(store.snapshot.fileCount) files"
-                                     : "loading…")
-                .font(.system(size: 10)).foregroundStyle(Theme.faint)
-            Spacer()
-            Button { showSettings.toggle() } label: {
-                Image(systemName: "gearshape").font(.system(size: 10, weight: .semibold))
-            }.buttonStyle(.plain).foregroundStyle(showSettings ? Theme.green : Theme.muted)
-            Button { store.refresh() } label: {
-                Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .semibold))
-            }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
+    /// Shared footer: the mode/tab-specific trust line on the left, actions on the right (one
+    /// bar), then the "updated · N files" status centered beneath it — matching the design. The
+    /// trust line lives here now (was repeated per-panel); it's hidden behind the gear, where
+    /// SettingsView shows its own.
+    private var footer: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                if !showSettings {
+                    GlowDot(color: Theme.green, size: 6, glow: 4)
+                    Text(trustText).font(.system(size: 10)).foregroundStyle(Theme.muted)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                Spacer(minLength: 8)
+                Button { showSettings.toggle() } label: {
+                    Image(systemName: "gearshape").font(.system(size: 10, weight: .semibold))
+                }.buttonStyle(.plain).foregroundStyle(showSettings ? Theme.green : Theme.muted)
+                Button { store.refresh() } label: {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .semibold))
+                }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+                    .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 15).padding(.vertical, 9)
+            .background(Theme.subtleFill)
+            Text(store.hasLoadedOnce
+                 ? "updated \(updatedAgo(store.snapshot.lastUpdated)) · \(store.snapshot.fileCount) files"
+                 : "loading…")
+                .font(.system(size: 9.5)).foregroundStyle(Theme.faint)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 7).padding(.bottom, 9)
         }
-        .padding(.horizontal, 17).padding(.vertical, 9)
-        .background(Theme.subtleFill)
+    }
+
+    /// The mode/tab-specific trust line: subscription is local-only, Bedrock/API states the
+    /// price-table read, History is computed on-device.
+    private var trustText: String {
+        if tab == .history { return "Computed on-device · 0 network calls" }
+        return store.snapshot.mode == .burn
+            ? "0 network calls · reads ~/.claude"
+            : "Local only — nothing leaves this Mac"
     }
 
     private var loading: some View { LoadingView() }

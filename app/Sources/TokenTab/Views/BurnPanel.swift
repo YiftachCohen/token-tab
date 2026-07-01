@@ -10,9 +10,21 @@ import TokenTabCore
 struct BurnPanel: View {
     let snapshot: Snapshot
     @Binding var menuMetric: MenuMetric
+    var now: Date
 
     private var agg: Aggregate { snapshot.agg }
-    private var split: MainSubSplit { agg.todaySplit }
+
+    /// The "easy" line: project the day's spend from today-so-far plus the last hour's rate
+    /// run to local midnight. Shown only while actually burning (a live-ish rate), so it never
+    /// invents a forecast from a cold meter.
+    private var pacePrediction: String? {
+        guard let cost = agg.cost, cost.lastHour > 0 else { return nil }
+        let cal = Calendar.current
+        let dayEnd = cal.startOfDay(for: now).addingTimeInterval(24 * 3600)
+        let hoursLeft = max(0, dayEnd.timeIntervalSince(now) / 3600)
+        let projected = cost.today + cost.lastHour * hoursLeft
+        return "On pace for ~\(Fmt.usd(projected)) today"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -20,10 +32,10 @@ struct BurnPanel: View {
             VStack(alignment: .leading, spacing: 0) {
                 SectionLabel(text: "BURNED TODAY")
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(Fmt.usd(agg.cost?.today ?? 0))
-                        .font(Theme.figure(40, weight: .bold))
-                        .tracking(Theme.tightTracking(40))
-                        .foregroundStyle(Theme.ink)
+                    AnimatedNumber(target: agg.cost?.today ?? 0,
+                                   font: Theme.hero(40, weight: .bold),
+                                   tracking: Theme.tightTracking(40),
+                                   color: Theme.ink) { Fmt.usd($0) }
                     Text("est.").font(.system(size: 13)).foregroundStyle(Theme.muted)
                 }
                 .padding(.top, 6)
@@ -61,54 +73,109 @@ struct BurnPanel: View {
             .card()
             .padding(.horizontal, 17).padding(.top, 14)
 
-            // Usage · main vs sub-agent
-            VStack(alignment: .leading, spacing: 9) {
-                HStack {
-                    SectionLabel(text: "USAGE · MAIN vs SUB-AGENT")
-                    Spacer()
-                    HStack(spacing: 9) {
-                        legend(color: Theme.green, text: "main")
-                        legend(color: Theme.green.opacity(0.3), text: "sub")
+            // Today · by model — on pay-per-token, "which model cost me money?" is the real
+            // question (main-vs-sub-agent says nothing about spend). Sorted by $, with a
+            // cost-share bar and a per-row %; deeper amber = more spend.
+            byModelToday
+                .padding(.horizontal, 17).padding(.top, 16)
+
+            if let pace = pacePrediction {
+                Text(pace)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.amber)
+                    .padding(.vertical, 4).padding(.horizontal, 10)
+                    .background(Theme.amber.opacity(0.16), in: Capsule())
+                    .padding(.horizontal, 17).padding(.top, 14)
+            }
+
+        }
+        .padding(.bottom, 12)
+    }
+
+    // MARK: today · by model
+
+    private struct ModelSpend: Identifiable {
+        let id = UUID(); let name: String; let tokens: Int; let cost: Double
+    }
+
+    /// Today's spend per model, from the History series' last (today) bucket, sorted by $
+    /// (ties by tokens). The hero is "BURNED TODAY", so this breakdown is today too — and it
+    /// reuses the already-computed per-day model maps, so Core stays untouched.
+    private var todayByModel: [ModelSpend] {
+        guard let today = snapshot.history.last else { return [] }
+        var keys = Set(today.costByModel.keys); keys.formUnion(today.tokensByModel.keys)
+        return keys.map { k in
+            ModelSpend(name: prettyModel(k),
+                       tokens: today.tokensByModel[k] ?? 0,
+                       cost: today.costByModel[k] ?? 0)
+        }
+        .filter { $0.tokens > 0 || $0.cost > 0 }
+        .sorted { $0.cost != $1.cost ? $0.cost > $1.cost : $0.tokens > $1.tokens }
+    }
+
+    /// Real model id → display name, folding the parser's placeholder ids (`<synthetic>` /
+    /// `<unknown>` / empty) into a clean "Other" so they never render raw in the receipt.
+    private func prettyModel(_ base: String) -> String {
+        let id = base.lowercased()
+        if base.isEmpty || id == "<synthetic>" || id == "<unknown>" { return "Other" }
+        return Fmt.modelName(base)
+    }
+
+    /// Deeper amber = more spend (cost-rank tint, used by both the bar and the row dots).
+    private func amberTint(_ rank: Int) -> Color {
+        switch rank {
+        case 0:  return Theme.amber
+        case 1:  return Theme.amber.opacity(0.6)
+        case 2:  return Theme.amber.opacity(0.38)
+        default: return Theme.amber.opacity(0.24)
+        }
+    }
+
+    @ViewBuilder private var byModelToday: some View {
+        let rows = Array(todayByModel.prefix(4))
+        // Share is of ALL of today's spend, so top-4 shares stay honest when more models exist.
+        let total = todayByModel.reduce(0) { $0 + $1.cost }
+        VStack(alignment: .leading, spacing: 9) {
+            SectionLabel(text: "TODAY · BY MODEL")
+            if rows.isEmpty {
+                Text("No spend yet today")
+                    .font(.system(size: 11)).foregroundStyle(Theme.faint)
+            } else {
+                // Cost-share bar over a track; the track remainder reads as "everything else".
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3).fill(Theme.track)
+                        HStack(spacing: 1.5) {
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
+                                let share = costShare(r.cost, total: total)
+                                RoundedRectangle(cornerRadius: 3).fill(amberTint(i))
+                                    .frame(width: share > 0 ? max(2, CGFloat(share) * geo.size.width) : 0)
+                            }
+                        }
                     }
                 }
-                MiniBar(fraction: mainFrac, subFraction: subFrac, color: Theme.green, height: 9)
-                HStack {
-                    Text("main \(Fmt.abbrev(split.mainTokens)) · \(Fmt.usd(split.mainCost))")
-                    Spacer()
-                    Text("sub-agent \(Fmt.abbrev(split.subTokens)) · \(Fmt.usd(split.subCost))")
+                .frame(height: 8)
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
+                    let share = costShare(r.cost, total: total)
+                    HStack(spacing: 9) {
+                        Circle().fill(amberTint(i)).frame(width: 7, height: 7)
+                        Text(r.name).font(.system(size: 12)).foregroundStyle(Theme.ink)
+                        Text("· \(Fmt.abbrev(r.tokens))")
+                            .font(.system(size: 11)).foregroundStyle(Theme.faint)
+                        Spacer(minLength: 8)
+                        Text("\(Int((share * 100).rounded()))%")
+                            .font(Theme.figure(11, weight: .regular)).foregroundStyle(Theme.faint)
+                            .frame(width: 32, alignment: .trailing)
+                        Text(Fmt.usd(r.cost))
+                            .font(Theme.figure(12, weight: .semibold)).foregroundStyle(Theme.ink)
+                            .frame(width: 54, alignment: .trailing)
+                    }
                 }
-                .font(Theme.figure(11.5, weight: .regular))
-                .foregroundStyle(Theme.muted)
-                Text(modelsLine)
-                    .font(.system(size: 10)).foregroundStyle(Theme.faint)
             }
-            .padding(.horizontal, 17).padding(.top, 16)
-
-            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 12)
-            HStack(spacing: 6) {
-                GlowDot(color: Theme.green)
-                Text("0 network calls · reads ~/.claude · bundled price table")
-                    .font(.system(size: 10)).foregroundStyle(Theme.faint)
-            }
-            .padding(.horizontal, 17).padding(.vertical, 11)
         }
     }
 
-    private var mainFrac: Double { split.total > 0 ? Double(split.mainTokens) / Double(split.total) : 0 }
-    private var subFrac: Double { split.total > 0 ? Double(split.subTokens) / Double(split.total) : 0 }
-
-    /// "Claude · Opus · Sonnet · Haiku" — the agent plus the model tiers actually present.
-    private var modelsLine: String {
-        let tiers = ["opus", "sonnet", "haiku", "fable"].filter { tier in
-            agg.byModel.keys.contains { $0.lowercased().contains(tier) }
-        }.map { $0.capitalized }
-        return (["Claude"] + tiers).joined(separator: " · ")
-    }
-
-    private func legend(color: Color, text: String) -> some View {
-        HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 9, height: 5)
-            Text(text).font(.system(size: 9.5)).foregroundStyle(Theme.faint)
-        }
+    private func costShare(_ cost: Double, total: Double) -> Double {
+        total > 0 ? cost / total : 0
     }
 }

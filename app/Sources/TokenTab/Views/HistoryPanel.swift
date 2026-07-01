@@ -19,10 +19,15 @@ struct HistoryPanel: View {
 
     @State private var range: Int
     @State private var metric: HistMetric
+    @State private var chartProgress: Double = 0   // open-beat: bars grow on appear
+    /// Kept so the chart can carry color-as-mode: green bars on a subscription, amber on
+    /// pay-per-token (a cost chart drawn in green would cross-wire the green=health semantic).
+    private let mode: Mode
 
     /// Default the metric to the mode's headline: tokens on a subscription, $ on pay-per-token.
     init(snapshot: Snapshot, mode: Mode) {
         self.snapshot = snapshot
+        self.mode = mode
         _range = State(initialValue: 14)
         _metric = State(initialValue: mode == .subscription ? .tokens : .cost)
     }
@@ -87,10 +92,10 @@ struct HistoryPanel: View {
             VStack(alignment: .leading, spacing: 0) {
                 SectionLabel(text: "\(periodVerb) · LAST \(range) DAYS")
                 HStack(alignment: .firstTextBaseline, spacing: 11) {
-                    Text(periodTotal)
-                        .font(Theme.figure(34, weight: .bold))
-                        .tracking(Theme.tightTracking(34))
-                        .foregroundStyle(Theme.ink)
+                    AnimatedNumber(target: total,
+                                   font: Theme.hero(34, weight: .bold),
+                                   tracking: Theme.tightTracking(34),
+                                   color: Theme.ink) { isTok ? Fmt.abbrev(Int($0.rounded())) : Fmt.usd($0) }
                     if hasPrev { DeltaBadge(deltaPct: deltaPct) }
                 }
                 .padding(.top, 7)
@@ -100,11 +105,22 @@ struct HistoryPanel: View {
             // Daily bars + axis
             VStack(spacing: 6) {
                 if maxValue > 0 {
+                    // Color carries the mode. Subscription: green bars, amber "today" (pops by
+                    // hue). Bedrock/API (cost): an all-amber chart — a calmer amber body with the
+                    // brightest amber for today — so the $ chart stays true to amber=cost.
+                    let burn = mode != .subscription
                     HistoryChart(bars: bars, maxValue: maxValue, avg: avg,
-                                 bar: solid(0x2E9E63, 0x36C98A),
-                                 today: solid(0xC08A3E, 0xD6A45A),
-                                 avgLine: solid(0x76736D, 0x9AA1B1).opacity(0.55))
+                                 bar: burn ? solid(0xC2740F, 0xF5B44D).opacity(0.5)
+                                           : solid(0x2E9E63, 0x36C98A),
+                                 today: burn ? solid(0xC2740F, 0xF5B44D)
+                                             : solid(0xC08A3E, 0xD6A45A),
+                                 avgLine: solid(0x76736D, 0x9AA1B1).opacity(0.55),
+                                 progress: chartProgress)
                         .frame(height: 74)
+                        .onAppear {
+                            chartProgress = 0
+                            withAnimation(.easeOut(duration: OpenBeat.duration)) { chartProgress = 1 }
+                        }
                 } else {
                     Text("No usage in this range yet")
                         .font(.system(size: 11)).foregroundStyle(Theme.faint)
@@ -115,7 +131,8 @@ struct HistoryPanel: View {
                         .font(Theme.figure(9.5, weight: .regular)).foregroundStyle(Theme.faint)
                     Spacer()
                     HStack(spacing: 4) {
-                        RoundedRectangle(cornerRadius: 1.5).fill(Theme.amberBar)
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(mode == .subscription ? Theme.amberBar : Theme.amber)
                             .frame(width: 7, height: 5)
                         Text("today").font(.system(size: 9.5)).foregroundStyle(Theme.faint)
                     }
@@ -140,10 +157,8 @@ struct HistoryPanel: View {
             }
             .padding(.horizontal, 17).padding(.top, 12)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
-            TrustFooter(text: "Computed on-device · 0 network calls")
-                .padding(.vertical, 12)
         }
+        .padding(.bottom, 12)
     }
 
     /// Family → accent: Opus amber (cost leader), Sonnet green (volume leader), Haiku slate,
@@ -174,13 +189,20 @@ struct HistBar {
 /// The daily bar chart: a dashed average line behind rounded bars. Today is amber, weekends
 /// are a faded green, weekdays solid green — matching the design's fill rules. Bar width and
 /// gap scale with the day count (wider bars at 7d, thinner at 30d).
-struct HistoryChart: View {
+struct HistoryChart: View, Animatable {
     var bars: [HistBar]
     var maxValue: Double
     var avg: Double
     var bar: Color
     var today: Color
     var avgLine: Color
+    var progress: Double = 1            // open-beat: bars grow from the baseline (0 → full)
+
+    // Drives the Canvas redraw each eased frame as the bars grow in.
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
 
     var body: some View {
         Canvas { ctx, size in
@@ -201,7 +223,7 @@ struct HistoryChart: View {
 
             // Bars.
             for (i, b) in bars.enumerated() {
-                let h = max(2, CGFloat(b.value / maxValue) * (H - 3))
+                let h = max(2, CGFloat(b.value / maxValue) * (H - 3)) * progress
                 let x = CGFloat(i) * (bw + gap)
                 let rect = CGRect(x: x, y: H - h, width: bw, height: h)
                 let color = b.today ? today : (b.weekend ? bar.opacity(0.3) : bar)
