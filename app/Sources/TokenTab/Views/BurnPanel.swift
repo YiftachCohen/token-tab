@@ -134,7 +134,7 @@ struct BurnPanel: View {
     @ViewBuilder private var byModelToday: some View {
         let rows = Array(todayByModel.prefix(4))
         // Share is of ALL of today's spend, so top-4 shares stay honest when more models exist.
-        let total = max(todayByModel.reduce(0) { $0 + $1.cost }, 0.0001)
+        let total = todayByModel.reduce(0) { $0 + $1.cost }
         VStack(alignment: .leading, spacing: 9) {
             SectionLabel(text: "TODAY · BY MODEL")
             if rows.isEmpty {
@@ -147,21 +147,23 @@ struct BurnPanel: View {
                         RoundedRectangle(cornerRadius: 3).fill(Theme.track)
                         HStack(spacing: 1.5) {
                             ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
+                                let share = costShare(r.cost, total: total)
                                 RoundedRectangle(cornerRadius: 3).fill(amberTint(i))
-                                    .frame(width: max(2, CGFloat(r.cost / total) * geo.size.width))
+                                    .frame(width: share > 0 ? max(2, CGFloat(share) * geo.size.width) : 0)
                             }
                         }
                     }
                 }
                 .frame(height: 8)
                 ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
+                    let share = costShare(r.cost, total: total)
                     HStack(spacing: 9) {
                         Circle().fill(amberTint(i)).frame(width: 7, height: 7)
                         Text(r.name).font(.system(size: 12)).foregroundStyle(Theme.ink)
                         Text("· \(Fmt.abbrev(r.tokens))")
                             .font(.system(size: 11)).foregroundStyle(Theme.faint)
                         Spacer(minLength: 8)
-                        Text("\(Int((r.cost / total * 100).rounded()))%")
+                        Text("\(Int((share * 100).rounded()))%")
                             .font(Theme.figure(11, weight: .regular)).foregroundStyle(Theme.faint)
                             .frame(width: 32, alignment: .trailing)
                         Text(Fmt.usd(r.cost))
@@ -171,5 +173,9 @@ struct BurnPanel: View {
                 }
             }
         }
+    }
+
+    private func costShare(_ cost: Double, total: Double) -> Double {
+        total > 0 ? cost / total : 0
     }
 }
