@@ -10,12 +10,18 @@ permissions:
 
 jobs:
   test:
-    name: test (node ${{ matrix.node }})
+    name: test (node ${{ matrix.node }}, ${{ matrix.tz }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         node: [18, 20, 22]
+        tz: [UTC]
+        include:
+          - { node: 22, tz: Pacific/Auckland }
+          - { node: 22, tz: America/Los_Angeles }
+    env:
+      TZ: ${{ matrix.tz }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,8 +54,14 @@ jobs:
           exit $fail
 
   swift:
-    name: swift parity (macos)
+    name: swift parity (macos, ${{ matrix.tz }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, Pacific/Auckland]
+    env:
+      TZ: ${{ matrix.tz }}
     steps:
       - uses: actions/checkout@v4
       - run: swift --version
