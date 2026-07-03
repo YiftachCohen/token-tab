@@ -211,9 +211,8 @@ port in `app/Sources/TokenTabCore` is kept in deliberate parity — see
 [`AGENTS.md`](AGENTS.md).
 
 Contributions are welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the
-trust invariants and the two-engine parity rule; changes are listed in
-[`CHANGELOG.md`](CHANGELOG.md). Found a way to defeat the trust claims? That's
-a security report: see [`SECURITY.md`](SECURITY.md).
+trust invariants and the two-engine parity rule. Found a way to defeat the
+trust claims? That's a security report: see [`SECURITY.md`](SECURITY.md).
 
 Branding assets and usage live in [`app/Branding/`](app/Branding/README.md).
 License: MIT.
