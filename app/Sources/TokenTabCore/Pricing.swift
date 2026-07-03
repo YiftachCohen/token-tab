@@ -48,6 +48,11 @@ public struct Pricing: CostModel {
         "haiku": "claude-haiku-4-5",
     ]
 
+    /// The rate-table's model keys, exposed so tests can assert the shared parity
+    /// fixture covers the table exhaustively (see RatesCoverageTests).
+    public static var ratedModelIds: Set<String> { Set(rates.keys) }
+    public static var aliasIds: Set<String> { Set(aliases.keys) }
+
     /// Reduce any model id to the rate-table key (strip [1m], Bedrock region/vendor
     /// prefixes, the `-vN:M` Bedrock version suffix, and a trailing `-YYYYMMDD` date).
     public static func canonicalModelId(_ model: String) -> String {
