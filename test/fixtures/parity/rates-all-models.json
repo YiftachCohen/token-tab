@@ -1,0 +1,54 @@
+{
+  "name": "exhaustive rate-table coverage — one record per RATES key + per alias (future-dated, so windows stay idle)",
+  "_comment": "THE COVERAGE CONTRACT: test/rates-coverage.test.mjs asserts records here == JS RATES+ALIASES keys; RatesCoverageTests.swift asserts the same against the Swift table. Adding a model to either engine REQUIRES adding a record here (1M input + 1M output; expected cost = input rate + output rate).",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    { "messageId": "ra01", "requestId": "rr01", "model": "claude-fable-5",    "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra02", "requestId": "rr02", "model": "claude-opus-4-8",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra03", "requestId": "rr03", "model": "claude-opus-4-7",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra04", "requestId": "rr04", "model": "claude-opus-4-6",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra05", "requestId": "rr05", "model": "claude-sonnet-5",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra06", "requestId": "rr06", "model": "claude-sonnet-4-6", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra07", "requestId": "rr07", "model": "claude-haiku-4-5",  "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra08", "requestId": "rr08", "model": "claude-opus-4-5",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra09", "requestId": "rr09", "model": "claude-opus-4-1",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra10", "requestId": "rr10", "model": "claude-opus-4",     "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra11", "requestId": "rr11", "model": "claude-sonnet-4-5", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra12", "requestId": "rr12", "model": "claude-sonnet-4",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra13", "requestId": "rr13", "model": "claude-3-5-haiku",  "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra14", "requestId": "rr14", "model": "opus",              "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra15", "requestId": "rr15", "model": "sonnet",            "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra16", "requestId": "rr16", "model": "haiku",             "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false }
+  ],
+  "expect": {
+    "total": 32000000,
+    "today": 0,
+    "thisWeek": 0,
+    "rolling5h": 0,
+    "bySurface": { "subscription": 32000000, "bedrock": 0, "untracked": 0 },
+    "cost": {
+      "total": 496.8,
+      "today": 0,
+      "byModel": {
+        "claude-fable-5": 60,
+        "claude-opus-4-8": 30,
+        "claude-opus-4-7": 30,
+        "claude-opus-4-6": 30,
+        "claude-sonnet-5": 18,
+        "claude-sonnet-4-6": 18,
+        "claude-haiku-4-5": 6,
+        "claude-opus-4-5": 30,
+        "claude-opus-4-1": 90,
+        "claude-opus-4": 90,
+        "claude-sonnet-4-5": 18,
+        "claude-sonnet-4": 18,
+        "claude-3-5-haiku": 4.8,
+        "opus": 30,
+        "sonnet": 18,
+        "haiku": 6
+      },
+      "unpricedTokens": 0
+    }
+  }
+}

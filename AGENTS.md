@@ -52,6 +52,18 @@ behavior by adding a fixture there rather than hand-copying another twin test. (
 fixture asserts only the fields it pins; `today`/`cost.today` are local-calendar values,
 so pin them only where a fixture is timezone-independent.)
 
+**Adding or changing a model rate — checklist:**
+1. `src/pricing.mjs` — add/update the entry in `RATES` (and `ALIASES` if a bare
+   alias should resolve to it).
+2. `app/Sources/TokenTabCore/Pricing.swift` — mirror the same entry in
+   `rates`/`aliases`.
+3. `test/fixtures/parity/rates-all-models.json` — add a record for it (1M input
+   + 1M output tokens) and its `cost.byModel` line (= input rate + output rate);
+   update `total`, `bySurface`, and `cost.total`.
+4. `node --test && swift test --package-path app` — the coverage tests
+   (`test/rates-coverage.test.mjs`, `RatesCoverageTests.swift`) fail loudly if
+   any of the three is missing.
+
 ## Build / test / audit
 
 ```sh

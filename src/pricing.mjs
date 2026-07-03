@@ -58,6 +58,11 @@ const ALIASES = {
   haiku: "claude-haiku-4-5",
 };
 
+/** The rate-table's model keys, exported so tests can assert the shared parity
+ *  fixture covers the table exhaustively (see test/rates-coverage.test.mjs). */
+export const RATED_MODEL_IDS = Object.freeze(Object.keys(RATES));
+export const ALIAS_IDS = Object.freeze(Object.keys(ALIASES));
+
 /** Reduce any model id to the rate-table key:
  *  - strip the [1m] suffix (same surface, same price on current models)
  *  - strip Bedrock region prefixes (us./eu./apac.) and the `anthropic.` vendor prefix

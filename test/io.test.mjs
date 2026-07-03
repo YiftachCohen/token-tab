@@ -105,15 +105,17 @@ test("window cap from a local config file (TOKENTAB_CONFIG) -> dropdown shows a 
   }
 });
 
-test("CRLF config file (TOKENTAB_CONFIG) is tolerated -> dropdown shows a %", async () => {
+test("CRLF line endings in a local config file are tolerated (window cap still applies)", async () => {
+  // Pins that the JS regex's trailing `\s*$` absorbs the \r of a Windows-line-ending file —
+  // the Swift parser is fixed to match this (Config.parseEnvFile splits on any newline).
   const dir = makeFixtureDir();
   const cfg = join(tmpdir(), `tt-cfg-${process.pid}-${Math.floor(performance.now())}.env`);
-  writeFileSync(cfg, "TOKENTAB_WINDOW_CAP=1000\r\n"); // Windows line endings; the \s*$ must eat the \r
+  writeFileSync(cfg, "TOKENTAB_WINDOW_CAP=1000\r\n");
   try {
     const env = { ...process.env, TOKENTAB_LOG_DIR: dir, TOKENTAB_CONFIG: cfg };
     delete env.TOKENTAB_WINDOW_CAP; // prove the value comes from the file, not the env
     const { stdout } = await run("node", [CLI, "--swiftbar"], { env });
-    assert.match(stdout, /5h window:.*%/, "a % appears even with a CRLF-terminated cap line");
+    assert.match(stdout, /5h window:.*%/, "a % appears once a cap is configured, even with CRLF");
     assert.match(stdout, /cap from config/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

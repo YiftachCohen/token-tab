@@ -1,9 +1,8 @@
 // Token Tab — machine-local settings (mirrors loadLocalConfig in token-tab.mjs).
 //
 // Reads TOKENTAB_* keys from the environment, or from a KEY=VALUE file kept OUTSIDE the
-// repo (resolution order, matching the JS engine: $TOKENTAB_CONFIG > ~/.config/token-tab/env
-// > ~/.token-tab.env) so your plan cap never gets committed. Real env vars win. Only
-// TOKENTAB_* keys are honored — plus Claude Code's
+// repo ($TOKENTAB_CONFIG, then ~/.config/token-tab/env or ~/.token-tab.env) so your plan
+// cap never gets committed. Real env vars win. Only TOKENTAB_* keys are honored — plus Claude Code's
 // own CLAUDE_CODE_USE_BEDROCK, which forces the Bedrock panel (see `useBedrock`): a
 // sandboxed GUI app won't inherit your shell env, so it has to be settable in the file
 // too. Reads a local file only — no network, no secrets.
@@ -21,8 +20,9 @@ enum Config {
     private static func loadFileValues() -> [String: String] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         // Candidate order mirrors the JS engine's loadLocalConfig(): $TOKENTAB_CONFIG first
-        // (highest priority), then the two default paths. Read the env var directly — going
-        // through Config.string(_:) would recurse into fileValues while it's being computed.
+        // (read straight from the process env — NOT via string(_:), which would recurse into
+        // fileValues), then the two default dotfile paths. A leading tilde is expanded the same
+        // way LogReader.defaultLogDir() does.
         var candidates: [URL] = []
         if let cfg = ProcessInfo.processInfo.environment["TOKENTAB_CONFIG"], !cfg.isEmpty {
             candidates.append(URL(fileURLWithPath: (cfg as NSString).expandingTildeInPath))
@@ -32,7 +32,7 @@ enum Config {
         var values: [String: String] = [:]
         for url in candidates {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            // First file (and first line) wins per key, matching the JS `!(m[1] in process.env)`.
+            // First file (and first line) wins per key, matching the JS `!(m[1] in process.env)` guard.
             for (key, val) in parseEnvFile(text) where values[key] == nil {
                 values[key] = val
             }
@@ -46,9 +46,8 @@ enum Config {
     /// (the JS `\s*$` eats the trailing \r), strips one layer of matching quotes.
     static func parseEnvFile(_ text: String) -> [String: String] {
         var values: [String: String] = [:]
-        // Split on any newline — Character.isNewline is true for \n, \r, and \r\n, so a
-        // CRLF file yields clean lines with no trailing \r. Splitting on the bare "\n"
-        // character alone left a \r on every value, so Int(...) / switch cases silently failed.
+        // Split on any newline (\r, \n, \r\n) so a CRLF file yields clean lines with no
+        // trailing \r — otherwise Int("400000000\r") is nil and "bedrock\r" matches no case.
         for line in text.split(whereSeparator: \.isNewline) {
             let s = String(line)
             guard let eq = s.firstIndex(of: "=") else { continue }
