@@ -1,8 +1,9 @@
 // Token Tab — machine-local settings (mirrors loadLocalConfig in token-tab.mjs).
 //
 // Reads TOKENTAB_* keys from the environment, or from a KEY=VALUE file kept OUTSIDE the
-// repo (~/.config/token-tab/env or ~/.token-tab.env) so your plan cap never gets
-// committed. Real env vars win. Only TOKENTAB_* keys are honored — plus Claude Code's
+// repo (resolution order, matching the JS engine: $TOKENTAB_CONFIG > ~/.config/token-tab/env
+// > ~/.token-tab.env) so your plan cap never gets committed. Real env vars win. Only
+// TOKENTAB_* keys are honored — plus Claude Code's
 // own CLAUDE_CODE_USE_BEDROCK, which forces the Bedrock panel (see `useBedrock`): a
 // sandboxed GUI app won't inherit your shell env, so it has to be settable in the file
 // too. Reads a local file only — no network, no secrets.
@@ -19,24 +20,45 @@ enum Config {
 
     private static func loadFileValues() -> [String: String] {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = [
-            home.appendingPathComponent(".config/token-tab/env"),
-            home.appendingPathComponent(".token-tab.env"),
-        ]
+        // Candidate order mirrors the JS engine's loadLocalConfig(): $TOKENTAB_CONFIG first
+        // (highest priority), then the two default paths. Read the env var directly — going
+        // through Config.string(_:) would recurse into fileValues while it's being computed.
+        var candidates: [URL] = []
+        if let cfg = ProcessInfo.processInfo.environment["TOKENTAB_CONFIG"], !cfg.isEmpty {
+            candidates.append(URL(fileURLWithPath: (cfg as NSString).expandingTildeInPath))
+        }
+        candidates.append(home.appendingPathComponent(".config/token-tab/env"))
+        candidates.append(home.appendingPathComponent(".token-tab.env"))
         var values: [String: String] = [:]
         for url in candidates {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            for line in text.split(separator: "\n") {
-                let s = String(line)
-                guard let eq = s.firstIndex(of: "=") else { continue }
-                let key = s[..<eq].trimmingCharacters(in: .whitespaces)
-                guard key.hasPrefix("TOKENTAB_") || key == "CLAUDE_CODE_USE_BEDROCK" else { continue }
-                var val = s[s.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-                if (val.hasPrefix("\"") && val.hasSuffix("\"")) || (val.hasPrefix("'") && val.hasSuffix("'")) {
-                    val = String(val.dropFirst().dropLast())
-                }
-                if values[key] == nil { values[key] = val }
+            // First file (and first line) wins per key, matching the JS `!(m[1] in process.env)`.
+            for (key, val) in parseEnvFile(text) where values[key] == nil {
+                values[key] = val
             }
+        }
+        return values
+    }
+
+    /// Parse one env-file's text into the honored KEY=VALUE pairs. Internal (not
+    /// private) so tests can pin CRLF/quoting behavior without touching $HOME.
+    /// Mirrors the JS regex in token-tab.mjs loadLocalConfig(): tolerant of CRLF
+    /// (the JS `\s*$` eats the trailing \r), strips one layer of matching quotes.
+    static func parseEnvFile(_ text: String) -> [String: String] {
+        var values: [String: String] = [:]
+        // Split on any newline — Character.isNewline is true for \n, \r, and \r\n, so a
+        // CRLF file yields clean lines with no trailing \r. Splitting on the bare "\n"
+        // character alone left a \r on every value, so Int(...) / switch cases silently failed.
+        for line in text.split(whereSeparator: \.isNewline) {
+            let s = String(line)
+            guard let eq = s.firstIndex(of: "=") else { continue }
+            let key = s[..<eq].trimmingCharacters(in: .whitespaces)
+            guard key.hasPrefix("TOKENTAB_") || key == "CLAUDE_CODE_USE_BEDROCK" else { continue }
+            var val = s[s.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+            if (val.hasPrefix("\"") && val.hasSuffix("\"")) || (val.hasPrefix("'") && val.hasSuffix("'")) {
+                val = String(val.dropFirst().dropLast())
+            }
+            if values[key] == nil { values[key] = val }
         }
         return values
     }

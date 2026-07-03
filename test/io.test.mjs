@@ -105,6 +105,22 @@ test("window cap from a local config file (TOKENTAB_CONFIG) -> dropdown shows a 
   }
 });
 
+test("CRLF config file (TOKENTAB_CONFIG) is tolerated -> dropdown shows a %", async () => {
+  const dir = makeFixtureDir();
+  const cfg = join(tmpdir(), `tt-cfg-${process.pid}-${Math.floor(performance.now())}.env`);
+  writeFileSync(cfg, "TOKENTAB_WINDOW_CAP=1000\r\n"); // Windows line endings; the \s*$ must eat the \r
+  try {
+    const env = { ...process.env, TOKENTAB_LOG_DIR: dir, TOKENTAB_CONFIG: cfg };
+    delete env.TOKENTAB_WINDOW_CAP; // prove the value comes from the file, not the env
+    const { stdout } = await run("node", [CLI, "--swiftbar"], { env });
+    assert.match(stdout, /5h window:.*%/, "a % appears even with a CRLF-terminated cap line");
+    assert.match(stdout, /cap from config/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cfg, { force: true });
+  }
+});
+
 test("TOKENTAB_MODE=bedrock suppresses the subscription 5h-window panel (swiftbar)", async () => {
   const dir = makeFixtureDir(); // fixture is subscription-dominant (claude-opus-4-8)
   try {
