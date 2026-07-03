@@ -1,0 +1,97 @@
+name: Release
+
+# Tag a version (git tag v0.1.0 && git push --tags) and this builds the native
+# app, signs + notarizes it when the Apple secrets are configured, and drafts a
+# GitHub release with the artifacts and checksums. Without the secrets it still
+# works — the artifact is ad-hoc signed and the release notes say so.
+#
+# Optional repository secrets:
+#   MACOS_CERT_P12       base64 of the Developer ID Application .p12
+#   MACOS_CERT_PASSWORD  password for the .p12
+#   APPLE_ID             Apple ID email for notarytool
+#   APPLE_TEAM_ID        Developer team id
+#   APPLE_APP_PASSWORD   app-specific password for notarytool
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tests must pass before anything ships
+        run: |
+          node --test
+          swift test --package-path app
+
+      - name: Build Token Tab.app (ad-hoc signed)
+        run: bash app/Scripts/build-app.sh release
+
+      - name: Re-sign with Developer ID
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          KEYCHAIN=build.keychain
+          security create-keychain -p ci "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm cert.p12
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          test -n "$IDENTITY" || { echo "::error::no Developer ID Application identity in the imported cert"; exit 1; }
+          codesign --force --sign "$IDENTITY" \
+            --entitlements app/Bundle/TokenTab.entitlements \
+            --options runtime --timestamp \
+            "app/Token Tab.app"
+          echo "SIGNED=developer-id" >> "$GITHUB_ENV"
+
+      - name: Package
+        run: ditto -c -k --keepParent "app/Token Tab.app" "Token-Tab-${GITHUB_REF_NAME}.zip"
+
+      - name: Notarize and staple
+        if: env.MACOS_CERT_P12 != '' && env.APPLE_ID != ''
+        run: |
+          xcrun notarytool submit "Token-Tab-${GITHUB_REF_NAME}.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "app/Token Tab.app"
+          rm "Token-Tab-${GITHUB_REF_NAME}.zip"
+          ditto -c -k --keepParent "app/Token Tab.app" "Token-Tab-${GITHUB_REF_NAME}.zip"
+          echo "SIGNED=notarized" >> "$GITHUB_ENV"
+
+      - name: Checksums
+        run: shasum -a 256 Token-Tab-*.zip | tee checksums.txt
+
+      - name: Draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${SIGNED:-adhoc}" in
+            notarized)    trust="The app is Developer ID signed and notarized." ;;
+            developer-id) trust="The app is Developer ID signed but NOT notarized — Gatekeeper will warn." ;;
+            *)            trust="This build is ad-hoc signed (CI had no signing secrets) — right-click → Open to run it, or build from source: \`app/Scripts/build-app.sh\`." ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" --draft \
+            --title "Token Tab $GITHUB_REF_NAME" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md) for what changed.
+
+          $trust
+
+          Verify the download against \`checksums.txt\`." \
+            Token-Tab-*.zip checksums.txt

@@ -1,6 +1,6 @@
 {
   "name": "token-tab",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A provably-safe AI usage meter for the macOS menu bar. Reads local Claude Code logs, makes no network calls, keeps none of your content.",
   "type": "module",
   "license": "MIT",

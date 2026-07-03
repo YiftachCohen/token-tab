@@ -9,6 +9,8 @@
 </p>
 
 [![CI](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml/badge.svg)](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-2ea44f.svg)](package.json)
 
 Token Tab shows your Claude Code token usage in the macOS menu bar. It reads the logs
 Claude Code already writes to `~/.claude` — no API keys, no keychain, no network calls.
@@ -207,6 +209,11 @@ filesystem); `src/pricing.mjs` is the pure price table + cost math, injected int
 parser so the rates stay testable; `src/token-tab.mjs` is the thin I/O shell. The Swift
 port in `app/Sources/TokenTabCore` is kept in deliberate parity — see
 [`AGENTS.md`](AGENTS.md).
+
+Contributions are welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the
+trust invariants and the two-engine parity rule; changes are listed in
+[`CHANGELOG.md`](CHANGELOG.md). Found a way to defeat the trust claims? That's
+a security report: see [`SECURITY.md`](SECURITY.md).
 
 Branding assets and usage live in [`app/Branding/`](app/Branding/README.md).
 License: MIT.
