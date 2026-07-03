@@ -1,22 +1,37 @@
 #!/usr/bin/env bash
 # Token Tab — assemble the sandboxed Token Tab.app from the SwiftPM build.
 #
-# Produces a real .app bundle, ad-hoc code-signed with the App Sandbox entitlements (no
-# network). Local-only: no Apple Developer account needed. Notarization (for handing the
-# app to someone else) is a later step — see the repo README.
+# Produces a real .app bundle, code-signed with the App Sandbox entitlements (no
+# network). By default it ad-hoc signs for local use — no Apple Developer account
+# needed. For a distributable build, Scripts/package-app.sh drives this script with the
+# release knobs below, then notarizes.
 #
 # Usage:  app/Scripts/build-app.sh [debug|release]   (default: release)
 #         open "app/Token Tab.app"
+#
+# Release knobs (all optional, set as env vars):
+#   CODESIGN_IDENTITY   signing identity (default "-" = ad-hoc). A real identity
+#                       ("Developer ID Application: …") also turns on the hardened
+#                       runtime + secure timestamp that notarization requires.
+#   ARCHS               space-separated arch list, e.g. "arm64 x86_64" for a
+#                       universal binary (default: host arch only).
+#   VERSION             stamp CFBundleShortVersionString in the bundled Info.plist
+#                       (the checked-in plist is not touched). CFBundleVersion is
+#                       stamped with the git commit count for monotonicity.
 set -euo pipefail
 
 CONFIG="${1:-release}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # app/
 APP="$HERE/Token Tab.app"
 BIN_NAME="TokenTab"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 
-echo "▸ Building ($CONFIG)…"
-( cd "$HERE" && swift build -c "$CONFIG" )
-BIN="$(cd "$HERE" && swift build -c "$CONFIG" --show-bin-path)/$BIN_NAME"
+ARCH_FLAGS=()
+for a in ${ARCHS:-}; do ARCH_FLAGS+=(--arch "$a"); done
+
+echo "▸ Building ($CONFIG${ARCHS:+, ${ARCHS}})…"
+( cd "$HERE" && swift build -c "$CONFIG" ${ARCH_FLAGS+"${ARCH_FLAGS[@]}"} )
+BIN="$(cd "$HERE" && swift build -c "$CONFIG" ${ARCH_FLAGS+"${ARCH_FLAGS[@]}"} --show-bin-path)/$BIN_NAME"
 [ -x "$BIN" ] || { echo "✗ binary not found at $BIN"; exit 1; }
 
 echo "▸ Assembling bundle…"
@@ -31,15 +46,32 @@ mkdir -p "$APP/Contents/Resources/Fonts"
 cp "$HERE/Sources/TokenTab/Resources/Fonts/MartianMono.ttf" "$APP/Contents/Resources/Fonts/"
 cp "$HERE/Resources/Fonts/OFL.txt"                          "$APP/Contents/Resources/Fonts/"
 cp "$HERE/Bundle/Info.plist" "$APP/Contents/Info.plist"
+if [ -n "${VERSION:-}" ]; then
+  BUILD_NUM="$(git -C "$HERE" rev-list --count HEAD 2>/dev/null || echo 1)"
+  echo "▸ Stamping version $VERSION (build $BUILD_NUM)…"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
+                          -c "Set :CFBundleVersion $BUILD_NUM" \
+                          "$APP/Contents/Info.plist"
+fi
 # App icon (a gitignored build artifact) — generate from the gauge design if absent.
 [ -f "$HERE/Bundle/AppIcon.icns" ] || { echo "▸ Generating AppIcon.icns…"; bash "$HERE/Scripts/make-icon.sh"; }
 cp "$HERE/Bundle/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
-echo "▸ Signing (ad-hoc) with App Sandbox entitlements…"
-codesign --force --sign - \
-  --entitlements "$HERE/Bundle/TokenTab.entitlements" \
-  --timestamp=none \
-  "$APP"
+if [ "$CODESIGN_IDENTITY" = "-" ]; then
+  echo "▸ Signing (ad-hoc) with App Sandbox entitlements…"
+  codesign --force --sign - \
+    --entitlements "$HERE/Bundle/TokenTab.entitlements" \
+    --timestamp=none \
+    "$APP"
+else
+  # Distribution: hardened runtime + secure timestamp are notarization requirements.
+  echo "▸ Signing ($CODESIGN_IDENTITY) with App Sandbox entitlements + hardened runtime…"
+  codesign --force --sign "$CODESIGN_IDENTITY" \
+    --entitlements "$HERE/Bundle/TokenTab.entitlements" \
+    --options runtime \
+    --timestamp \
+    "$APP"
+fi
 
 echo "▸ Verifying entitlements (should show app-sandbox, NO network):"
 codesign -d --entitlements :- "$APP" 2>/dev/null | grep -Ei 'sandbox|network|user-selected' || true

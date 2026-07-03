@@ -22,6 +22,10 @@ Icon
 tmp/
 .tmp/
 
+# Release artifacts (produced by app/Scripts/package-app.sh / npm pack)
+dist/
+*.tgz
+
 # Swift / Xcode (native MenuBarExtra app under app/)
 .build/
 .swiftpm/
