@@ -27,6 +27,11 @@ jobs:
           [ "$TAG" = "$PKG" ]   || { echo "::error::tag v$TAG != package.json $PKG"; exit 1; }
           [ "$TAG" = "$PLIST" ] || { echo "::error::tag v$TAG != Info.plist $PLIST"; exit 1; }
 
+      # Same audit ci.yml runs on pushes/PRs. Tags don't trigger ci.yml, and a tag can
+      # point at any commit — no release draft without the invariants holding HERE.
+      - name: Trust-invariant audit
+        run: bash .github/scripts/trust-audit.sh
+
       - name: JS engine tests
         run: node --test
 
