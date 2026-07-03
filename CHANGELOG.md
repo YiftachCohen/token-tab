@@ -21,8 +21,9 @@ First tagged release.
   split. `CLAUDE_CODE_USE_BEDROCK` / `TOKENTAB_MODE` override for sandboxed setups.
 - **History tab**: daily bar chart (7/14/30-day), $ ⇄ tokens switch,
   vs-previous-period delta, busiest model.
-- **CLI** (`node src/token-tab.mjs`, npm bin `token-tab`): human, `--json`, and
-  `--swiftbar` reports. Zero runtime dependencies.
+- **CLI** (`node src/token-tab.mjs`; on npm as `@ycstudios/token-tab`, installed
+  command `token-tab`): human, `--json`, and `--swiftbar` reports. Zero runtime
+  dependencies.
 - **SwiftBar plugin** (`swiftbar/token-tab.30s.sh`): the one-symlink on-ramp.
 - **Cost estimates** from a bundled, auditable rate table (`src/pricing.mjs`,
   mirrored in Swift): Anthropic list rates, all four token classes, unknown models

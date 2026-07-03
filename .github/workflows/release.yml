@@ -52,7 +52,7 @@ jobs:
             --draft \
             --generate-notes \
             --title "Token Tab $GITHUB_REF_NAME" \
-            token-tab-*.tgz
+            ycstudios-token-tab-*.tgz
           echo "Draft created. Attach the notarized app zip built locally:"
           echo "  app/Scripts/package-app.sh ${GITHUB_REF_NAME#v}"
           echo "  gh release upload $GITHUB_REF_NAME dist/Token-Tab-${GITHUB_REF_NAME#v}.zip dist/Token-Tab-${GITHUB_REF_NAME#v}.zip.sha256"

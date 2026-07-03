@@ -6,8 +6,11 @@ Two artifacts ship per release, both from the same tag:
   notarized, stapled, universal (arm64 + x86_64). Built **locally** by
   `app/Scripts/package-app.sh` (add `--dmg` for a drag-to-Applications
   `Token-Tab-<version>.dmg` alongside it — Homebrew consumes the zip either way).
-- **`token-tab-<version>.tgz`** — the npm package (CLI + SwiftBar plugin + live
-  adapters). Built by `npm pack` / published with `npm publish`.
+- **`ycstudios-token-tab-<version>.tgz`** — the npm package
+  **`@ycstudios/token-tab`** (CLI + SwiftBar plugin + live adapters; the installed
+  command is still `token-tab`). Built by `npm pack` / published with `npm publish`.
+  Scoped because unscoped `token-tab` collides with the unrelated `tokentab` package
+  under npm's name-similarity rule.
 
 ## Why signing is local, not CI
 

@@ -79,7 +79,8 @@ network:
 
 ### CLI
 ```sh
-node src/token-tab.mjs            # human report
+npx @ycstudios/token-tab          # no install — or: npm i -g @ycstudios/token-tab
+node src/token-tab.mjs            # from a checkout: human report
 node src/token-tab.mjs --json     # machine-readable
 node src/token-tab.mjs --swiftbar # SwiftBar format
 ```
