@@ -123,8 +123,10 @@ app/
 - **Claude only** (reads `~/.claude`). The design's second agent, **Codex** (`~/.codex`),
   is designed-in (colors, the main/sub split) but its parser is not built yet — the
   subscription side-metric shows the Claude row only until it ships.
-- **Notarization is deferred.** The build is ad-hoc-signed for local use; a Developer ID
-  + notary round-trip is the step before handing the `.app` to someone else.
+- **Distribution builds are a separate script.** `build-app.sh` ad-hoc-signs for local
+  use. To hand the `.app` to someone else, `Scripts/package-app.sh` builds a universal
+  binary, signs with a Developer ID (hardened runtime), notarizes, staples, and drops a
+  checksummed zip in `dist/` — see [`RELEASING.md`](../RELEASING.md).
 - **Refresh** is event-driven: an **FSEvents** watch on `~/.claude` re-reads only when the
   logs actually change (debounced), so updates are near-instant and idle CPU is ~0 (no
   polling). A 30s clock tick advances the runway display without touching disk, and a 90s

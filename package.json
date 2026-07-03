@@ -1,16 +1,28 @@
 {
   "name": "token-tab",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A provably-safe AI usage meter for the macOS menu bar. Reads local Claude Code logs, makes no network calls, keeps none of your content.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YiftachCohen/token-tab.git"
+  },
+  "homepage": "https://github.com/YiftachCohen/token-tab#readme",
+  "bugs": "https://github.com/YiftachCohen/token-tab/issues",
   "bin": {
     "token-tab": "src/token-tab.mjs"
   },
+  "files": [
+    "src",
+    "adapters",
+    "swiftbar"
+  ],
   "scripts": {
     "start": "node src/token-tab.mjs",
     "swiftbar": "node src/token-tab.mjs --swiftbar",
-    "test": "node --test"
+    "test": "node --test",
+    "prepublishOnly": "node --test"
   },
   "engines": {
     "node": ">=18"

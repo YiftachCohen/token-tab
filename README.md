@@ -91,8 +91,11 @@ One symlink and you have `◧ <tokens>` in the menu bar in about a minute. See
 
 ### Menu bar — native app
 A SwiftUI `MenuBarExtra` app, App-Sandboxed with no network entitlement, reading
-`~/.claude` through a scoped read-only grant. It runs locally today — build and run it
-from [`app/README.md`](app/README.md). Not yet notarized for distribution.
+`~/.claude` through a scoped read-only grant. Grab the notarized zip from the
+[Releases page](https://github.com/YiftachCohen/token-tab/releases) when one is up, or
+build it yourself in two minutes from [`app/README.md`](app/README.md) — the from-source
+path is the point of the trust model anyway. Release builds are signed + notarized
+locally, never in CI ([`RELEASING.md`](RELEASING.md)).
 
 ## Accuracy
 
