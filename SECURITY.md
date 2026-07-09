@@ -16,8 +16,10 @@ that one of those claims doesn't hold.
   (`.github/workflows/ci.yml`, `audit` job) undetected.
 - Sandbox or entitlement issues in the native app
   (`app/Bundle/TokenTab.entitlements`).
-- Anything in the opt-in live path (`adapters/`) that exceeds its documented
-  scope of running `claude -p "/usage"` and parsing the printed summary.
+- Anything in the opt-in live paths (`adapters/`, or the bundled helper in
+  `app/Helper/`) that exceeds their documented scope of running
+  `claude -p "/usage"`, parsing the printed summary, and writing the local
+  cache file.
 
 Accuracy bugs (wrong totals, dedup mistakes, pricing drift) are ordinary bugs —
 please file a public issue for those.
