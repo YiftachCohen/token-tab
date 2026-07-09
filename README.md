@@ -9,6 +9,16 @@
 </p>
 
 [![CI](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml/badge.svg)](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-2ea44f.svg)](package.json)
+
+<p align="center">
+  <img src="docs/screenshots/menubar-overview.webp" alt="Token Tab in the macOS menu bar — the dropdown shows 91% of the 5-hour window left, an exact reset countdown, and today's tokens by model" width="344">
+</p>
+<p align="center">
+  <img src="docs/screenshots/history.webp" alt="History panel — daily token bars for the last 14 days with the period total and delta vs the previous period" width="322">
+  <img src="docs/screenshots/bedrock-burn.webp" alt="Bedrock mode — burned-today dollar estimate, burn rate per hour, and per-model cost breakdown" width="329">
+</p>
 
 Token Tab shows your Claude Code token usage in the macOS menu bar. It reads the logs
 Claude Code already writes to `~/.claude` — no API keys, no keychain, no network calls.
@@ -219,6 +229,10 @@ filesystem); `src/pricing.mjs` is the pure price table + cost math, injected int
 parser so the rates stay testable; `src/token-tab.mjs` is the thin I/O shell. The Swift
 port in `app/Sources/TokenTabCore` is kept in deliberate parity — see
 [`AGENTS.md`](AGENTS.md).
+
+Contributions are welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the
+trust invariants and the two-engine parity rule. Found a way to defeat the
+trust claims? That's a security report: see [`SECURITY.md`](SECURITY.md).
 
 Branding assets and usage live in [`app/Branding/`](app/Branding/README.md).
 License: MIT.

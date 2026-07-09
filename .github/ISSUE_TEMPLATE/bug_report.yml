@@ -1,0 +1,53 @@
+name: Bug report
+description: Something is wrong — a crash, a wrong number, a UI glitch.
+labels: [bug]
+body:
+  - type: dropdown
+    id: frontend
+    attributes:
+      label: Front-end
+      description: Where did you see it?
+      options:
+        - CLI (node src/token-tab.mjs)
+        - SwiftBar plugin
+        - Native app (Token Tab.app)
+        - Live sidecar (adapters/)
+        - Engine / tests
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: accuracy
+    attributes:
+      label: If a number looks wrong
+      description: >-
+        Paste the Token Tab figure next to the same figure from `ccusage`
+        (Claude-only subtotal) or Claude's `/usage`. Note that dollar totals
+        are expected to differ from ccusage by design (list rates vs LiteLLM
+        table) — token counts should not.
+      placeholder: |
+        token-tab today: …
+        ccusage (claude-only) today: …
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: e.g. 15.5
+  - type: input
+    id: versions
+    attributes:
+      label: Node / app version
+      placeholder: e.g. node 22.1, Token Tab 0.1.0, SwiftBar 2.0
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: >-
+        Any TOKENTAB_* / CLAUDE_* vars in play (values can be redacted), and
+        whether you use a subscription, the API, or Bedrock.
