@@ -64,6 +64,7 @@ CODESIGN_IDENTITY="$CODESIGN_IDENTITY" ARCHS="arm64 x86_64" VERSION="$VERSION" \
 echo "▸ Verifying signature…"
 codesign --verify --deep --strict "$APP"
 lipo -info "$APP/Contents/MacOS/TokenTab"
+lipo -info "$APP/Contents/MacOS/TokenTabLiveHelper"
 
 mkdir -p "$DIST"
 ZIP="$DIST/Token-Tab-$VERSION.zip"

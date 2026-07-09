@@ -23,6 +23,16 @@ let package = Package(
             dependencies: ["TokenTabCore"],
             resources: [.copy("Resources/Fonts")]   // Martian Mono (OFL) — the hero numeric face
         ),
+        // The live-% helper: the ONE subprocess in the native stack, deliberately fenced
+        // OUTSIDE app/Sources (in app/Helper) so the audit greps over app/Sources stay
+        // clean — the Swift twin of adapters/ vs src/ on the JS side. Ships inside the
+        // .app at Contents/MacOS, launched by launchd via the bundled agent plist
+        // (Bundle/com.tokentab.liveagent.plist), never as a child of the sandboxed app.
+        .executableTarget(
+            name: "TokenTabLiveHelper",
+            dependencies: ["TokenTabCore"],
+            path: "Helper"
+        ),
         .testTarget(
             name: "TokenTabCoreTests",
             dependencies: ["TokenTabCore"]

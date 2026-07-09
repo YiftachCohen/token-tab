@@ -35,6 +35,7 @@ struct PanelHeader<P: View>: View {
 struct DropdownView: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var access: AccessManager
+    @ObservedObject var helper: LiveHelperManager
     /// Settings (cap + live) live behind the gear so they're reachable in EVERY mode — the
     /// burn/API/Bedrock panel has no quota gauge to host them inline.
     @State private var showSettings = false
@@ -58,6 +59,9 @@ struct DropdownView: View {
             }
         }
         .frame(width: 322)
+        // Re-read launchd's view of the helper each time the dropdown opens, so a change
+        // made in System Settings (approve / remove) is reflected without a relaunch.
+        .onAppear { helper.refresh() }
         // Glass. The dial, opaque→sheer: ultraThick → thick → regular → thin → ultraThin. The old
         // default was ultraThick (most opaque); `thin` reads markedly more translucent, and the
         // now-brighter muted text keeps content legible. No edge stroke — the material's own edge
@@ -70,7 +74,7 @@ struct DropdownView: View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             VStack(spacing: 0) {
                 if showSettings {
-                    SettingsView(store: store, now: ctx.date) { showSettings = false }
+                    SettingsView(store: store, helper: helper, now: ctx.date) { showSettings = false }
                 } else {
                     // Shared header + tabs; only the body below the switcher swaps.
                     PanelHeader(pill: headerPill(now: ctx.date))
@@ -88,7 +92,7 @@ struct DropdownView: View {
         switch tab {
         case .overview:
             switch store.snapshot.mode {
-            case .subscription: SubscriptionPanel(store: store, now: now)
+            case .subscription: SubscriptionPanel(store: store, helper: helper, now: now)
             case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric, now: now)
             }
         case .history:

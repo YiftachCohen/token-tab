@@ -53,17 +53,25 @@ cat package.json | grep -A1 dependencies                        # -> {}
 ```
 
 The parser is `recordFromLine` in `src/core.mjs` — it returns `message.id`, `model`,
-`usage`, `timestamp`, `isSidechain`, never content. The one subprocess in the repo is
-the opt-in live reader, fenced outside `src/` in `adapters/` (see
-[Live server %](#live-server--opt-in)). The native app's own audit — sandbox
-entitlements, no-network greps over `app/Sources` — is in
+`usage`, `timestamp`, `isSidechain`, never content. In the native app, the same rule
+holds one level down: the ONLY subprocess anywhere in the native stack lives in
+`app/Helper` (the bundled live-% helper, see [Live server %](#live-server-)), fenced
+outside the audited `app/Sources` the same way `adapters/` is fenced outside `src/` —
+so this still prints nothing:
+
+```sh
+grep -RnE "Process\(|posix_spawn|NSTask|popen|execv" app/Sources
+```
+
+The native app's fuller audit — sandbox entitlements, no-network greps over
+`app/Sources`, the helper's own (deliberately unsandboxed) signature — is in
 [`app/README.md`](app/README.md#the-two-minute-audit-native-build).
 
 ## What runs where
 
 One job — read the logs, aggregate, show usage — as two engines (a JS core and a Swift
-port kept in parity) behind three front-ends. Only the opt-in live path touches the
-network:
+port kept in parity) behind several front-ends. Only the live path touches the network,
+and only once you turn it on:
 
 | Piece | What it is | Network? |
 |---|---|---|
@@ -71,11 +79,46 @@ network:
 | **CLI** | `node src/token-tab.mjs` → a terminal report | no |
 | **SwiftBar** | shell wrappers run the JS engine on a timer | no¹ |
 | **Native app** | `app/Token Tab.app`, the menu-bar UI (App-Sandboxed, no network entitlement) | no — kernel-enforced |
-| **Live sidecar** | `adapters/write-live.mjs` runs `claude /usage`, writes a cache file | yes — via `claude` |
+| **Bundled live helper** | `Contents/MacOS/TokenTabLiveHelper`, run by launchd only when you turn on Live % | yes — via `claude` |
+| **Live sidecar (script)** | `adapters/write-live.mjs` runs `claude /usage`, writes a cache file | yes — via `claude` |
 
 ¹ only the `…-live.2m.sh` variant calls `claude`; the default `…30s.sh` does not.
 
 ## Quick start
+
+1. **Install the app.**
+
+   ```sh
+   brew tap yiftachcohen/tap
+   brew install --cask token-tab
+   ```
+
+   Or grab the notarized zip or DMG from the
+   [Releases page](https://github.com/YiftachCohen/token-tab/releases) — Homebrew
+   installs the same signed, notarized artifact, pinned by sha256. Release builds are
+   signed + notarized locally, never in CI ([`RELEASING.md`](RELEASING.md)). Or build it
+   yourself in two minutes from [`app/README.md`](app/README.md) — the from-source path
+   is the point of the trust model anyway.
+
+2. **Grant read access.** On first launch it asks for a one-time, scoped, read-only
+   grant on `~/.claude`. That's it — token counts, cost estimates, and the 5-hour
+   window all work from there, no further setup.
+
+3. **On Max/Pro: click "Turn on Live %"** (in the dropdown's live row, or Settings).
+   One click — no cloning the repo, no Node, no Terminal. It registers a helper
+   bundled inside the app, which macOS lists under System Settings ▸ Login Items
+   ("Token Tab") so it's visible and removable, and shows the real server `%` a few
+   seconds later. It also learns your 5-hour token cap automatically from the first
+   reading. See [Live server %](#live-server-) for what the helper is and why turning
+   it on doesn't touch the app's own sandbox.
+
+That's the whole setup. API and Bedrock (pay-per-token) users don't see this step —
+there's no server quota to fetch, so the app just shows the burn panel.
+
+## Other front-ends (power users)
+
+The JS engine also drives a CLI and a SwiftBar plugin, for people who'd rather not run
+a GUI app.
 
 ### CLI
 ```sh
@@ -85,26 +128,13 @@ node src/token-tab.mjs --json     # machine-readable
 node src/token-tab.mjs --swiftbar # SwiftBar format
 ```
 
-### Menu bar — SwiftBar
+### SwiftBar
 One symlink and you have `◧ <tokens>` in the menu bar in about a minute. See
 [`swiftbar/README.md`](swiftbar/README.md). SwiftBar may need Full Disk Access to read
-`~/.claude` — broader than the native app's scoped grant; it's the fast on-ramp.
+`~/.claude` — broader than the native app's scoped grant.
 
-### Menu bar — native app
-A SwiftUI `MenuBarExtra` app, App-Sandboxed with no network entitlement, reading
-`~/.claude` through a scoped read-only grant.
-
-```sh
-brew tap yiftachcohen/tap
-brew install --cask token-tab
-```
-
-Or grab the notarized zip or DMG from the
-[Releases page](https://github.com/YiftachCohen/token-tab/releases) — Homebrew installs
-the same signed, notarized artifact, pinned by sha256. Or build it yourself in two
-minutes from [`app/README.md`](app/README.md) — the from-source path is the point of the
-trust model anyway. Release builds are signed + notarized locally, never in CI
-([`RELEASING.md`](RELEASING.md)).
+Neither front-end has a bundled helper of its own — `adapters/install-live.sh` (see
+below) is what feeds live `%` into the CLI or SwiftBar's `…-live.2m.sh` variant.
 
 ## Accuracy
 
@@ -153,9 +183,9 @@ Set these as env vars, or in a local `KEY=VALUE` file kept out of the repo —
 | `CLAUDE_CONFIG_DIR` | reads `$CLAUDE_CONFIG_DIR/projects` |
 | `TOKENTAB_WINDOW_CAP` | your plan's 5h token cap, to show a window `%` (see below) |
 | `CLAUDE_CODE_USE_BEDROCK` | Claude Code's Bedrock flag; switches the app to the pay-per-token panel² |
-| `TOKENTAB_LIVE` | opt in to the live server `%` via `claude -p "/usage"` (off by default) |
-| `TOKENTAB_LIVE_CACHE` | where the live sidecar writes its JSON (default `<logDir>/.token-tab-live.json`) |
-| `TOKENTAB_CLAUDE_BIN` | absolute path to `claude` when it isn't auto-resolved (SwiftBar's minimal PATH often needs this) |
+| `TOKENTAB_LIVE` | opt in to the live server `%` via `claude -p "/usage"` for the CLI/SwiftBar (off by default; the app uses the one-click toggle instead) |
+| `TOKENTAB_LIVE_CACHE` | where a live reader writes its JSON — bundled helper or script, same file (default `<logDir>/.token-tab-live.json`) |
+| `TOKENTAB_CLAUDE_BIN` | absolute path to `claude` when it isn't auto-resolved (launchd's and SwiftBar's minimal PATH often need this) |
 | `TOKENTAB_LIVE_DEBUG` | prints why live data was unavailable to stderr (diagnostic only) |
 
 ² On Bedrock, Claude Code logs bare `claude-*` ids that are indistinguishable from a
@@ -171,40 +201,83 @@ resets usage in fixed 5-hour blocks anchored to your first message of the block)
 
 - **The reset countdown is exact** ("Resets in 3h36m"), verified against Claude's own
   `/usage`: the window starts at your first message, not the top of the hour.
-- **A `%` shows only when you set `TOKENTAB_WINDOW_CAP`.** Anthropic doesn't publish the
-  per-plan cap, and Token Tab won't guess one. To get it: open Claude's `/usage`, note
-  "N% used", and set the cap to `current-window-tokens / (N/100)`. For example, 20M at
-  5% ⇒ `TOKENTAB_WINDOW_CAP=400000000`.
+- **A `%` needs a cap, and the app gets one for you.** Anthropic doesn't publish the
+  per-plan cap, so Token Tab won't guess one out of thin air — but with Live % on (see
+  below), it learns the cap automatically from a real reading (cap ≈ window tokens ÷
+  session `%`) and keeps using it once the reading goes stale. `TOKENTAB_WINDOW_CAP` is
+  the fallback for CLI/SwiftBar use or if you'd rather set it by hand: open Claude's
+  `/usage`, note "N% used", and set the cap to `current-window-tokens / (N/100)`. For
+  example, 20M at 5% ⇒ `TOKENTAB_WINDOW_CAP=400000000`.
 
-## Live server % (opt-in)
+## Live server %
 
-The live server `%` (what Claude's `/usage` shows) is available with `TOKENTAB_LIVE=1`.
-It does not make Token Tab phone home: it shells out to the official `claude` CLI
-(`claude -p "/usage"`), which does the keychain read and the network call, and Token
-Tab only parses the printed summary. The spawn lives in `adapters/claude-live.mjs`,
-outside the audited `src/` core, so the `src/` audit stays clean even with live on.
+The live server `%` (what Claude's `/usage` shows) is the authoritative number Anthropic
+tracks server-side — sharper than the local estimate, which only sees tokens already
+logged. In the app it's one click: **Turn on Live %**, in the dropdown's live row or in
+Settings. This never makes the app itself phone home — the app stays App-Sandboxed with
+no network entitlement, unchanged. What the click does:
 
+- **Registers a bundled helper** (`Contents/MacOS/TokenTabLiveHelper`, source fenced at
+  [`app/Helper/main.swift`](app/Helper/main.swift)) with `SMAppService`. macOS — not the
+  app — runs it, on its own timer (every 5 minutes, plus once at registration), and lists
+  it under **System Settings ▸ Login Items** as "Token Tab": visible, and removable with
+  one click there or in Settings. macOS may ask you to approve it first; the app
+  deep-links straight to Login Items for that.
+- **What the helper runs**: `claude -p "/usage" --output-format json` — the official
+  `claude` CLI does the keychain read and the network call; the helper only parses its
+  stdout, using the same pure parser the app uses
+  ([`app/Sources/TokenTabCore/LiveParse.swift`](app/Sources/TokenTabCore/LiveParse.swift),
+  parity-tested against `src/live-parse.mjs`).
+- **Where it writes**: atomically to `<logDir>/.token-tab-live.json` — inside the folder
+  you already granted, ignored by both log walkers (hidden and not `*.jsonl`). The app
+  reads that file as plain data.
 - **Fails closed.** If `claude` can't be resolved, times out, or its output format
-  changes, it falls back to the local estimate and shows a gray `live unavailable` line
-  (set `TOKENTAB_LIVE_DEBUG=1` for the reason).
-- **Native app: via a sidecar.** The sandboxed app can't spawn `claude`, so the opt-in
-  writer `adapters/write-live.mjs` runs `/usage` in a separate, user-launched process and
-  writes the parsed `%` to `<logDir>/.token-tab-live.json`; the app reads that file as
-  plain data (inside the folder you already granted, ignored by both log walkers — hidden
-  and not `*.jsonl`). The "no network" guarantee stays enforced — the network lives in the
-  sidecar you scheduled.
+  changes, the helper writes nothing and the app falls back to the local estimate,
+  showing a gray `live unavailable` line. Every run appends one line to
+  `~/Library/Logs/token-tab-live.log` (self-trims at 64KB) — useful for diagnosing why a
+  reading didn't land.
+- **Honors the same config** as everything else: `TOKENTAB_CLAUDE_BIN`,
+  `TOKENTAB_LIVE_CACHE`, `TOKENTAB_LOG_DIR`, `CLAUDE_CONFIG_DIR`, and the
+  `~/.config/token-tab/env` dotfile.
 
-  ```sh
-  adapters/install-live.sh             # LaunchAgent, refreshes every 5 min
-  adapters/install-live.sh uninstall   # stop + remove it
-  node adapters/write-live.mjs         # one-off, no scheduler
-  ```
+With a fresh reading the app headlines `91% left · live` and learns your 5-hour cap from
+it automatically (see [above](#the-5-hour-window)).
 
-  With a fresh reading the app headlines `91% left · live` and learns your cap from it
-  (cap ≈ window tokens ÷ session `%`), persisting it so a real `%` keeps showing once the
-  reading goes stale. On the menu bar, install `swiftbar/token-tab-live.2m.sh` (refreshes
-  every 2 minutes, sets `TOKENTAB_LIVE=1`); the default `token-tab.30s.sh` never spawns
-  anything.
+**Trust nuance, precisely stated:** the app binary is still App-Sandboxed with no
+network entitlement — unchanged, kernel-enforced. The helper is a *separate* binary in
+the same bundle, not sandboxed (it has to exec `claude`), never spawned by the app
+(`launchd` runs it), and only runs at all once you flip Live % on. `app/README.md`'s
+audit shows this in two commands: the app binary's signature still lists the sandbox
+entitlement and no network; the helper's shows neither, because it's the one process
+built to make the call.
+
+### From source, or for the CLI/SwiftBar: the script path
+
+The bundled helper is new; the original script agent still exists, still works, and is
+what feeds live `%` into the CLI and SwiftBar (which have no bundled helper of their
+own):
+
+```sh
+adapters/install-live.sh             # LaunchAgent, refreshes every 5 min
+adapters/install-live.sh uninstall   # stop + remove it
+node adapters/write-live.mjs         # one-off, no scheduler
+```
+
+It runs the same `claude /usage` call via `adapters/write-live.mjs` /
+`adapters/claude-live.mjs` (fenced outside `src/`, mirroring how the app's helper is
+fenced outside `app/Sources`) and writes the same cache file, so the app happily reads
+readings from either source. Reach for this path if you'd rather audit a ~100-line shell
+script than trust a signed binary, or if you're driving usage from the CLI or SwiftBar's
+`swiftbar/token-tab-live.2m.sh` (which sets `TOKENTAB_LIVE=1`; the default
+`token-tab.30s.sh` never spawns anything).
+
+If you previously installed the script agent and now use the app's one-click toggle
+instead, `adapters/install-live.sh uninstall` removes it. Keeping both running is
+harmless — they use distinct LaunchAgent labels (`com.tokentab.live` for the script,
+`com.tokentab.liveagent` for the bundled helper) so they can't collide — but it does
+mean two redundant `/usage` calls every few minutes. The Settings panel tells you when
+an external script is already feeding fresh readings, so you know the bundled helper
+isn't needed.
 
 The local 5-hour window stays the default everywhere and needs no opt-in.
 
