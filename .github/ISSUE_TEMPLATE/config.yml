@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/YiftachCohen/token-tab/discussions
+    about: Questions, setup help, and open-ended ideas fit better in Discussions.
+  - name: Security report
+    url: https://github.com/YiftachCohen/token-tab/security/advisories/new
+    about: Anything exploitable — see SECURITY.md. Please don't open a public issue.
