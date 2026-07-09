@@ -7,6 +7,24 @@ network posture) — see the [trust model](README.md#trust-model).
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) ·
 versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavior).
 
+## [0.1.1] — 2026-07-09
+
+### Fixed
+- **First-run grant flow could capture the whole home folder.** In the sandboxed app
+  the folder picker silently opened at `~` (a `fileExists(~/.claude)` pre-check can
+  never succeed inside the sandbox), so a single click on "Grant read access" granted
+  `$HOME` — and the log walker then enumerated it, tripping macOS's Desktop /
+  media-library consent prompts. Now: the picker always opens at `~/.claude`;
+  selecting the home folder (or any ancestor) is refused with an explanation; and an
+  over-broad bookmark saved by 0.1.0 is dropped and re-prompted on next launch
+  (self-healing — affected installs recover on update).
+- Relaunches now resolve the granted folder to its `projects` subdirectory the same
+  way the first run does (the saved-bookmark path previously skipped that step).
+
+### Trust surface
+- Unchanged: entitlements and parsed fields are identical to 0.1.0. The fix narrows
+  what the log walker can ever be pointed at.
+
 ## [0.1.0] — 2026-07-03
 
 First tagged release.
