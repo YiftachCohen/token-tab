@@ -21,7 +21,16 @@ import Foundation
 import TokenTabCore
 
 let fm = FileManager.default
-let home = fm.homeDirectoryForCurrentUser
+/// The REAL home, from the passwd db — not $HOME. This helper runs App-Sandboxed
+/// (macOS ≥14.2 requires it: a sandboxed app may only register sandboxed agents), and
+/// inside the sandbox $HOME points at the container. Everything claude-related lives
+/// under the real home, reachable via the temporary-exception entitlements.
+let home: URL = {
+    if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+        return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+    }
+    return fm.homeDirectoryForCurrentUser
+}()
 let env = ProcessInfo.processInfo.environment
 
 // MARK: - config (env wins, then the same dotfiles the app and JS engine honor)
@@ -47,7 +56,12 @@ func setting(_ key: String) -> String? {
     return nil
 }
 
-func expand(_ path: String) -> String { (path as NSString).expandingTildeInPath }
+/// Tilde-expand against the REAL home (expandingTildeInPath would use the container's).
+func expand(_ path: String) -> String {
+    if path == "~" { return home.path }
+    if path.hasPrefix("~/") { return home.path + String(path.dropFirst(1)) }
+    return path
+}
 
 // MARK: - logging (one line per run; the file self-trims so it can never grow unbounded)
 
@@ -125,6 +139,12 @@ func runClaudeUsage(bin: URL, timeout: TimeInterval = 30) -> String? {
     proc.executableURL = bin
     proc.arguments = ["-p", "/usage", "--output-format", "json"]
     proc.currentDirectoryURL = tmp
+    // The child inherits this sandbox AND its container-pointing $HOME. claude keeps its
+    // config, credentials and state under the real ~/.claude (which the entitlements
+    // open), so hand it the real home explicitly.
+    var childEnv = env
+    childEnv["HOME"] = home.path
+    proc.environment = childEnv
     let stdout = Pipe()
     proc.standardOutput = stdout
     proc.standardError = FileHandle.nullDevice

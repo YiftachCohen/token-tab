@@ -2,11 +2,12 @@
 //
 // Wraps SMAppService for the LaunchAgent shipped inside the bundle
 // (Contents/Library/LaunchAgents/com.tokentab.liveagent.plist → Contents/MacOS/
-// TokenTabLiveHelper). Registering it is allowed from the sandbox because the app never
-// runs the helper itself — launchd does, as its own process with its own (non-sandboxed)
-// signature — and macOS surfaces the whole thing in System Settings ▸ Login Items, where
-// the user can see it and kill it. This is what turns "clone the repo, install node,
-// paste a script into Terminal" into one click.
+// TokenTabLiveHelper). Registering it is allowed from the sandbox because the helper is
+// ALSO sandboxed (macOS ≥14.2 refuses otherwise — an unsandboxed agent would be a
+// sandbox escape) and the app never runs it — launchd does, as its own process — with
+// macOS surfacing the whole thing in System Settings ▸ Login Items, where the user can
+// see it and kill it. This is what turns "clone the repo, install node, paste a script
+// into Terminal" into one click.
 //
 // The app's trust posture is unchanged: this file only asks launchd to schedule or
 // unschedule a job. No network, no subprocess, no file writes.
@@ -29,7 +30,7 @@ final class LiveHelperManager: ObservableObject {
     @Published private(set) var status: Status = .unavailable
     @Published private(set) var lastError: String?
 
-    static let plistName = "com.tokentab.liveagent.plist"
+    nonisolated static let plistName = "com.tokentab.liveagent.plist"
 
     private var service: SMAppService { SMAppService.agent(plistName: Self.plistName) }
 
@@ -49,7 +50,12 @@ final class LiveHelperManager: ObservableObject {
         case .enabled:          status = .on
         case .requiresApproval: status = .requiresApproval
         case .notRegistered:    status = .off
-        case .notFound:         status = .unavailable
+        // .notFound despite the plist being in the bundle (checked above) means
+        // SMAppService resolved a DIFFERENT copy of this bundle id — LaunchServices
+        // keeps one canonical registration per id, and a second install (e.g. a dev
+        // build next to /Applications) can shadow this one. register() registers THIS
+        // copy and heals it, so offer the toggle; a real failure surfaces as lastError.
+        case .notFound:         status = .off
         @unknown default:       status = .off
         }
     }

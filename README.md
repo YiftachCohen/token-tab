@@ -74,7 +74,8 @@ grep -RnE "Process\(|posix_spawn|NSTask|popen|execv" app/Sources
 ```
 
 The native app's fuller audit — sandbox entitlements, no-network greps over
-`app/Sources`, the helper's own (deliberately unsandboxed) signature — is in
+`app/Sources`, the helper's own sandbox (the network-client entitlement is its one
+extra power) — is in
 [`app/README.md`](app/README.md#the-two-minute-audit-native-build).
 
 ## What runs where
@@ -255,11 +256,14 @@ it automatically (see [above](#the-5-hour-window)).
 
 **Trust nuance, precisely stated:** the app binary is still App-Sandboxed with no
 network entitlement — unchanged, kernel-enforced. The helper is a *separate* binary in
-the same bundle, not sandboxed (it has to exec `claude`), never spawned by the app
-(`launchd` runs it), and only runs at all once you flip Live % on. `app/README.md`'s
-audit shows this in two commands: the app binary's signature still lists the sandbox
-entitlement and no network; the helper's shows neither, because it's the one process
-built to make the call.
+the same bundle, **also App-Sandboxed** (macOS requires it: a sandboxed app may only
+register sandboxed agents), opened exactly as far as its one job needs — the network
+client entitlement for the `claude /usage` call plus scoped read-write on `~/.claude`
+([`app/Bundle/TokenTabLiveHelper.entitlements`](app/Bundle/TokenTabLiveHelper.entitlements)
+is short; read it). It is never spawned by the app (`launchd` runs it) and only runs at
+all once you flip Live % on. `app/README.md`'s audit shows this in two commands: the
+app binary's signature lists the sandbox and no network; the helper's lists the sandbox
+plus network-client — the one process built to make the call, and nothing else.
 
 ### From source, or for the CLI/SwiftBar: the script path
 

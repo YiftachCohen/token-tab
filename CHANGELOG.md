@@ -30,14 +30,17 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 - Docs restructured around the app as the primary product: `README.md`'s quick start is
   now install-the-app-first, with the CLI and SwiftBar demoted to a clearly labeled
   "power users" section; `app/README.md` documents the helper's layout and its own
-  (deliberately unsandboxed) audit.
+  audit.
 
 ### Trust surface
 - Unchanged for the app binary: still App-Sandboxed, still no network entitlement.
-- New: a second binary in the same bundle, `TokenTabLiveHelper`, is NOT sandboxed (it
-  execs `claude`) and is never spawned by the app — only `launchd`, and only once the
-  user opts in. It's fenced outside `app/Sources`, so the existing `app/Sources` audit
-  greps (no `Process(`/`posix_spawn`/etc.) still print nothing.
+- New: a second binary in the same bundle, `TokenTabLiveHelper`, also App-Sandboxed
+  (macOS ≥14.2 requires it — a sandboxed app may only register sandboxed agents), with
+  exactly two extra powers: `network.client` (the `claude /usage` call) and scoped
+  `~/.claude` read-write (`app/Bundle/TokenTabLiveHelper.entitlements`). It is never
+  spawned by the app — only `launchd`, and only once the user opts in. It's fenced
+  outside `app/Sources`, so the existing `app/Sources` audit greps (no
+  `Process(`/`posix_spawn`/etc.) still print nothing.
 - The script live path (`adapters/install-live.sh`) is unchanged and still works — now
   repositioned as the live source for the CLI/SwiftBar front-ends and the from-source
   audit path for the bundled helper. It uses a distinct LaunchAgent label

@@ -102,16 +102,19 @@ grep -RnE "Process\(|posix_spawn|NSTask|popen|execv|/bin/" app/Sources
 grep -RnE "message\.content|\"content\"" app/Sources
 ```
 
-The live helper is the one deliberate exception to "no subprocess," and it's auditable on
-its own terms — a ~200-line file (`app/Helper/main.swift`) outside `app/Sources`, and a
-binary with the opposite signature from the app it ships next to:
+The live helper is the one deliberate exception to "no subprocess," and it's auditable
+on its own terms — a ~200-line file (`app/Helper/main.swift`) outside `app/Sources`,
+and a binary that is ALSO App-Sandboxed (macOS ≥14.2 requires it: a sandboxed app may
+only register sandboxed agents), just with its sandbox opened exactly as far as its one
+job needs:
 
 ```sh
 # The app binary: sandbox ON, no network entitlement — same as above, unchanged by Live %:
 codesign -d --entitlements :- "app/Token Tab.app"
 
-# The helper binary: NO sandbox entitlement (prints nothing) — that's the point, it's the
-# one process built to exec `claude` and make the network call:
+# The helper binary: sandbox ON, plus network.client (claude /usage is a network call)
+# and scoped ~/.claude read-write — nothing else. The entitlements file is short; read it
+# at app/Bundle/TokenTabLiveHelper.entitlements:
 codesign -d --entitlements :- "app/Token Tab.app/Contents/MacOS/TokenTabLiveHelper"
 
 # It only ever runs `claude -p "/usage" --output-format json` — this prints exactly ONE
@@ -163,9 +166,11 @@ app/
 ```
 
 `build-app.sh` assembles the bundle's `Contents/`, which isn't checked in:
-`Contents/MacOS/TokenTab` (the sandboxed app binary), `Contents/MacOS/TokenTabLiveHelper`
-(the unsandboxed helper binary), and `Contents/Library/LaunchAgents/com.tokentab.liveagent.plist`
-(copied straight from `Bundle/`).
+`Contents/MacOS/TokenTab` (the app binary — sandboxed, no network),
+`Contents/MacOS/TokenTabLiveHelper` (the helper — sandboxed too, with network.client +
+scoped ~/.claude; see `Bundle/TokenTabLiveHelper.entitlements`), and
+`Contents/Library/LaunchAgents/com.tokentab.liveagent.plist` (copied straight from
+`Bundle/`).
 
 ## Status / not yet
 

@@ -42,9 +42,10 @@ echo "▸ Assembling bundle…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$BIN_NAME"
-# The live-% helper + its LaunchAgent plist. The helper is NOT sandboxed (it must exec
-# `claude`, which does the network call) and is never spawned by the app — launchd runs
-# it, only after the user flips "Live %" on (SMAppService → Login Items).
+# The live-% helper + its LaunchAgent plist. The helper is sandboxed too (macOS ≥14.2
+# rejects unsandboxed agents from a sandboxed app), just with network.client + scoped
+# ~/.claude access so it can exec `claude`. It is never spawned by the app — launchd
+# runs it, only after the user flips "Live %" on (SMAppService → Login Items).
 cp "$HELPER_BIN" "$APP/Contents/MacOS/$HELPER_NAME"
 mkdir -p "$APP/Contents/Library/LaunchAgents"
 cp "$HERE/Bundle/com.tokentab.liveagent.plist" "$APP/Contents/Library/LaunchAgents/"
@@ -67,13 +68,16 @@ fi
 [ -f "$HERE/Bundle/AppIcon.icns" ] || { echo "▸ Generating AppIcon.icns…"; bash "$HERE/Scripts/make-icon.sh"; }
 cp "$HERE/Bundle/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
-# Sign inside-out: the nested helper first, then the bundle. The helper gets NO
-# entitlements (deliberately not sandboxed — it execs `claude`); the app keeps the
-# App Sandbox + no-network entitlements. Two binaries, two postures, one bundle.
+# Sign inside-out: the nested helper first, then the bundle. Since macOS 14.2 a
+# sandboxed app may only register agents that are ALSO sandboxed, so the helper gets
+# its own sandbox — opened exactly as far as its job needs (network.client for the
+# `claude /usage` call, ~/.claude read-write; see TokenTabLiveHelper.entitlements).
+# The app keeps its stricter App Sandbox: NO network. Two postures, one bundle.
 if [ "$CODESIGN_IDENTITY" = "-" ]; then
-  echo "▸ Signing (ad-hoc): helper, then app with App Sandbox entitlements…"
+  echo "▸ Signing (ad-hoc): helper (sandbox + network.client), then app (sandbox, no network)…"
   codesign --force --sign - \
     --identifier com.tokentab.TokenTabLiveHelper \
+    --entitlements "$HERE/Bundle/TokenTabLiveHelper.entitlements" \
     --timestamp=none \
     "$APP/Contents/MacOS/$HELPER_NAME"
   codesign --force --sign - \
@@ -83,9 +87,10 @@ if [ "$CODESIGN_IDENTITY" = "-" ]; then
 else
   # Distribution: hardened runtime + secure timestamp are notarization requirements —
   # for every Mach-O in the bundle, the helper included.
-  echo "▸ Signing ($CODESIGN_IDENTITY): helper, then app (App Sandbox + hardened runtime)…"
+  echo "▸ Signing ($CODESIGN_IDENTITY): helper (sandbox + network.client), then app (sandbox, no network; hardened runtime)…"
   codesign --force --sign "$CODESIGN_IDENTITY" \
     --identifier com.tokentab.TokenTabLiveHelper \
+    --entitlements "$HERE/Bundle/TokenTabLiveHelper.entitlements" \
     --options runtime \
     --timestamp \
     "$APP/Contents/MacOS/$HELPER_NAME"
@@ -98,7 +103,7 @@ fi
 
 echo "▸ Verifying entitlements (should show app-sandbox, NO network):"
 codesign -d --entitlements :- "$APP" 2>/dev/null | grep -Ei 'sandbox|network|user-selected' || true
-echo "▸ Helper entitlements (should print nothing — unsandboxed, no special powers):"
+echo "▸ Helper entitlements (sandboxed too, network.client is its ONE extra power):"
 codesign -d --entitlements :- "$APP/Contents/MacOS/$HELPER_NAME" 2>/dev/null | grep -Ei 'sandbox|network' || true
 
 echo "✓ Built: $APP"

@@ -31,7 +31,18 @@ let package = Package(
         .executableTarget(
             name: "TokenTabLiveHelper",
             dependencies: ["TokenTabCore"],
-            path: "Helper"
+            path: "Helper",
+            exclude: ["Info.plist"],
+            // Embed Helper/Info.plist in the binary: the helper runs App-Sandboxed
+            // (macOS ≥14.2 requires sandboxed agents from a sandboxed app), and the
+            // sandbox keys a bare executable's container off the bundle identifier in
+            // this embedded section — without it, libsecinit traps at launch.
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-sectcreate",
+                              "-Xlinker", "__TEXT",
+                              "-Xlinker", "__info_plist",
+                              "-Xlinker", "Helper/Info.plist"])
+            ]
         ),
         .testTarget(
             name: "TokenTabCoreTests",
