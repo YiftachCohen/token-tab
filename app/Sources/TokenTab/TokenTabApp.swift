@@ -11,6 +11,8 @@ import SwiftUI
 struct TokenTabApp: App {
     @StateObject private var access: AccessManager
     @StateObject private var store: UsageStore
+    /// The one-click switch for the bundled live-% helper (SMAppService / Login Items).
+    @StateObject private var helper = LiveHelperManager()
     @State private var started = false
 
     init() {
@@ -26,7 +28,7 @@ struct TokenTabApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            DropdownView(store: store, access: access)
+            DropdownView(store: store, access: access, helper: helper)
         } label: {
             MenuBarLabel(snapshot: store.snapshot, menuMetric: store.menuMetric, now: store.clock)
                 .onAppear { startup() }   // the label is present at launch → runs immediately

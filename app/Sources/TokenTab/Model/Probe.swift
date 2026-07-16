@@ -7,10 +7,12 @@
 // directly (no sandbox), so run the bare binary, not the sandboxed .app.
 
 import Foundation
+import ServiceManagement
 import TokenTabCore
 
 enum Probe {
     static func runIfRequested() {
+        runHelperProbeIfRequested()
         guard CommandLine.arguments.contains("--probe") else { return }
         let dir = LogReader.defaultLogDir()
         let files = LogReader.findJSONL(in: dir)
@@ -66,6 +68,48 @@ enum Probe {
         if let data = try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys]),
            let s = String(data: data, encoding: .utf8) {
             print(s)
+        }
+        exit(0)
+    }
+
+    /// `--probe-helper`: print exactly what LiveHelperManager would observe — the bundle
+    /// path, whether the agent plist is visible from inside the (possibly sandboxed)
+    /// process, and SMAppService's raw status — then exit. Diagnoses "Live % toggle
+    /// thinks it's a dev build" without clicking through the UI.
+    private static func runHelperProbeIfRequested() {
+        guard CommandLine.arguments.contains(where: { $0.hasPrefix("--probe-helper") }) else { return }
+        let bundleURL = Bundle.main.bundleURL
+        let plist = bundleURL
+            .appendingPathComponent("Contents/Library/LaunchAgents")
+            .appendingPathComponent(LiveHelperManager.plistName)
+        let service = SMAppService.agent(plistName: LiveHelperManager.plistName)
+        var out: [String: Any] = [
+            "bundleURL": bundleURL.path,
+            "bundlePathExtension": bundleURL.pathExtension,
+            "plistPath": plist.path,
+            "plistExists": FileManager.default.fileExists(atPath: plist.path),
+            "smStatusRaw": service.status.rawValue,   // 0 notRegistered · 1 enabled · 2 requiresApproval · 3 notFound
+        ]
+        // `--probe-helper-register`: additionally try the actual register → report the
+        // error (or success + new status), then unregister to leave launchd unchanged.
+        if CommandLine.arguments.contains("--probe-helper-register") {
+            do {
+                try service.register()
+                out["register"] = "ok"
+                out["smStatusAfter"] = service.status.rawValue
+                try? service.unregister()
+            } catch {
+                out["register"] = "threw: \((error as NSError).domain) \((error as NSError).code) — \(error.localizedDescription)"
+                out["smStatusAfter"] = service.status.rawValue
+            }
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys]),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+            // Also drop the result in the (container) temp dir, so the probe is readable
+            // when the app is launched via `open` and stdout goes nowhere.
+            let drop = FileManager.default.temporaryDirectory.appendingPathComponent("token-tab-helper-probe.json")
+            try? data.write(to: drop)
         }
         exit(0)
     }

@@ -13,8 +13,12 @@ core claim, so they are non-negotiable and CI-enforced (see `.github/workflows/c
    over `src/` must print nothing:
    - `grep -RnE "fetch|http|https|net\.|URLSession|Socket|dns" src/`
    - `grep -RnE "child_process|spawn|execFile" src/`
-   The ONLY subprocess in the repo is `adapters/claude-live.mjs` (the opt-in live
-   path, enabled by `TOKENTAB_LIVE`), deliberately fenced **outside** `src/`.
+   The only subprocesses in the repo are the two opt-in live paths, each
+   deliberately fenced outside its audited tree: `adapters/claude-live.mjs`
+   (JS, enabled by `TOKENTAB_LIVE`, outside `src/`) and `app/Helper/main.swift`
+   (the bundled live helper, registered via the in-app Live % toggle, outside
+   `app/Sources`). Both do exactly one thing: run `claude -p "/usage"` and
+   write the parsed percentages to the local cache file.
 3. **Never read message content.** The parser decodes only token metadata
    (`type`, `model`, `message.id`, `requestId`, `usage`, `timestamp`,
    `isSidechain`). It must never touch `message.content`.

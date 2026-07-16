@@ -11,7 +11,7 @@ body:
         - CLI (node src/token-tab.mjs)
         - SwiftBar plugin
         - Native app (Token Tab.app)
-        - Live sidecar (adapters/)
+        - Live % (bundled helper or adapters/ script)
         - Engine / tests
     validations:
       required: true

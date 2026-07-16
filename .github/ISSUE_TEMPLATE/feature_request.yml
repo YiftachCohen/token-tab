@@ -21,7 +21,7 @@ body:
         Token Tab's core claim is that it can't leak anything — no network, no
         runtime dependencies, no reads of message content, sandboxed app.
         Features that require breaking one of these will be declined or
-        redesigned around the opt-in adapters/ fence.
+        redesigned around the opt-in live fences (adapters/, app/Helper/).
       options:
         - label: This feature can work within the trust invariants (or I've explained why the fence needs to move).
           required: true

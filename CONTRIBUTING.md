@@ -12,8 +12,9 @@ that breaks one will not merge. Full detail in [`AGENTS.md`](AGENTS.md):
 
 1. **Zero runtime dependencies.** `package.json` `dependencies` stays `{}`;
    `app/Package.swift` declares no SwiftPM dependencies.
-2. **No network, no subprocess in `src/`.** The only subprocess in the repo is
-   the opt-in live reader, fenced in `adapters/`.
+2. **No network, no subprocess in the audited trees (`src/`, `app/Sources`).**
+   The only subprocesses in the repo are the two opt-in live paths, fenced
+   outside them: `adapters/` (JS) and `app/Helper/` (the bundled app helper).
 3. **Never read message content.** The parser touches token metadata only —
    never `message.content`.
 4. **The native app cannot phone home.** `app/Bundle/TokenTab.entitlements`

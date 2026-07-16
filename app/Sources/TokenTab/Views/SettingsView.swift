@@ -12,6 +12,7 @@ import TokenTabCore
 
 struct SettingsView: View {
     @ObservedObject var store: UsageStore
+    @ObservedObject var helper: LiveHelperManager
     var now: Date
     var onClose: () -> Void
 
@@ -51,53 +52,53 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 17).padding(.top, 14)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
+            // Quota machinery (cap + live %) is a subscription concept — on Bedrock/API
+            // there is no server quota to fetch, so showing its setup there is pure noise.
+            if store.snapshot.mode == .subscription {
+                Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
 
-            // 5-HOUR TOKEN CAP — works in any mode; the subscription gauge reads it for a real %.
-            VStack(alignment: .leading, spacing: 9) {
-                SectionLabel(text: "5-HOUR TOKEN CAP")
-                Text("Your plan's 5-hour token limit. Setting it turns the runway into a real “% left”.")
-                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    TextField("tokens, e.g. 400000000", text: $capText)
-                        .textFieldStyle(.plain).font(Theme.figure(11))
-                        .focused($capFocused)
-                        .frame(maxWidth: .infinity)
-                        .tokenFieldChrome(focused: capFocused)
-                        .onSubmit(commitCap)
-                    Button("Save", action: commitCap)
-                        .buttonStyle(.borderedProminent).tint(Theme.green)
-                        .font(.system(size: 11, weight: .semibold))
-                    Button("Clear") { store.capOverride = 0; capText = "" }
-                        .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                // LIVE SERVER % first — it's the primary path now (one click, learns the
+                // cap for you); the manual cap below is the fallback. The script path
+                // survives only in dev builds, where no helper is bundled.
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: 6) {
+                        SectionLabel(text: "LIVE SERVER %")
+                        Spacer()
+                        liveBadge
+                    }
+                    Text("The authoritative % from `claude /usage`. The app stays sandboxed (no network); a bundled helper makes the call every ~5 min and writes a local cache the app reads.")
+                        .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    liveControl
                 }
-                Text(capStatus).font(.system(size: 10.5)).foregroundStyle(Theme.faint)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 17).padding(.top, 14)
+                .padding(.horizontal, 17).padding(.top, 14)
 
-            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
+                Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
 
-            // LIVE SERVER % — the same hand-off the subscription panel offers, just always reachable.
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 6) {
-                    SectionLabel(text: "LIVE SERVER %")
-                    Spacer()
-                    liveBadge
+                // 5-HOUR TOKEN CAP — the manual fallback; with Live % on it's learned.
+                VStack(alignment: .leading, spacing: 9) {
+                    SectionLabel(text: "5-HOUR TOKEN CAP")
+                    Text("Your plan's 5-hour token limit. With Live % on it's learned automatically — set it by hand only if you keep Live % off.")
+                        .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        TextField("tokens, e.g. 400000000", text: $capText)
+                            .textFieldStyle(.plain).font(Theme.figure(11))
+                            .focused($capFocused)
+                            .frame(maxWidth: .infinity)
+                            .tokenFieldChrome(focused: capFocused)
+                            .onSubmit(commitCap)
+                        Button("Save", action: commitCap)
+                            .buttonStyle(.borderedProminent).tint(Theme.green)
+                            .font(.system(size: 11, weight: .semibold))
+                        Button("Clear") { store.capOverride = 0; capText = "" }
+                            .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                    }
+                    Text(capStatus).font(.system(size: 10.5)).foregroundStyle(Theme.faint)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("The authoritative % from `claude /usage`. The app is sandboxed (no network), so a tiny helper fetches it and the app reads the cache. One-time setup — installs a background agent that refreshes every ~5 min:")
-                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                commandChip(display: "adapters/install-live.sh", copy: installCopy, note: "auto-refresh")
-                commandChip(display: "node adapters/write-live.mjs", copy: nodeCopy, note: "once")
-                Text(adaptersDir == nil
-                     ? "Run from the Token Tab folder. See README › Turn on live."
-                     : "Copy → paste in Terminal once; it keeps running in the background. Stop it with `install-live.sh uninstall`.")
-                    .font(.system(size: 10)).foregroundStyle(Theme.faint)
-                    .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 17).padding(.top, 14)
             }
-            .padding(.horizontal, 17).padding(.top, 14)
 
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             TrustFooter(text: "Local only — nothing leaves this Mac")
@@ -129,6 +130,63 @@ struct SettingsView: View {
         } else {
             Text("off").font(.system(size: 9.5, weight: .semibold)).foregroundStyle(Theme.faint)
         }
+    }
+
+    /// The helper switch, by launchd's actual state. One primary action per state; the
+    /// dev build (no bundled agent) falls back to the manual script chips below.
+    @ViewBuilder private var liveControl: some View {
+        switch helper.status {
+        case .off:
+            VStack(alignment: .leading, spacing: 7) {
+                Button { helper.setEnabled(true) } label: {
+                    Text("Turn on Live %").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(Theme.green)
+                .font(.system(size: 11, weight: .semibold))
+                Text(externalFeedNote ?? "Adds a background item under Login Items — visible there, removable any time.")
+                    .font(.system(size: 10)).foregroundStyle(Theme.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let err = helper.lastError {
+                    Text(err).font(.system(size: 10)).foregroundStyle(Theme.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        case .on:
+            HStack(spacing: 8) {
+                Text("Helper: on — refreshes every ~5 min.")
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 8)
+                Button("Turn off") { helper.setEnabled(false) }
+                    .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
+        case .requiresApproval:
+            VStack(alignment: .leading, spacing: 7) {
+                Text("macOS needs your approval: allow Token Tab's helper under Login Items.")
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { helper.openLoginItems() } label: {
+                    Text("Open Login Items…").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(Theme.green)
+                .font(.system(size: 11, weight: .semibold))
+            }
+        case .unavailable:
+            VStack(alignment: .leading, spacing: 7) {
+                Text("No bundled helper in this build (dev run). Schedule the script instead:")
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                commandChip(display: "adapters/install-live.sh", copy: installCopy, note: "auto-refresh")
+                commandChip(display: "node adapters/write-live.mjs", copy: nodeCopy, note: "once")
+            }
+        }
+    }
+
+    /// When the cache is fresh but the bundled helper is off, something ELSE is feeding
+    /// live — the script LaunchAgent or a SwiftBar live wrapper. Say so instead of
+    /// offering a toggle that would double the `claude /usage` calls.
+    private var externalFeedNote: String? {
+        guard helper.status == .off, let l = snapshot.live, l.isFresh(now: now) else { return nil }
+        return "Live readings are currently fed by an external script (adapters/install-live.sh) — no need for the bundled helper unless you remove it."
     }
 
     /// On-brand 3-way segmented control (green selection on a subtle track) matching the app's

@@ -15,11 +15,14 @@ The headline auto-switches on the dominant surface detected from your model ids:
 
 - **Subscription** (`claude-*` / Max·Pro) → **runway**: a ring + the exact time left in
   the rolling 5-hour window, with tokens demoted to a side metric. A token **%** appears
-  only when you set a cap (`TOKENTAB_WINDOW_CAP`); otherwise the runway is shown as exact
-  time — never a guessed %.
+  once there's a cap — learned automatically from a Live % reading, or set by hand
+  (`TOKENTAB_WINDOW_CAP`) as a fallback; otherwise the runway is shown as exact time —
+  never a guessed %. Settings (and the cap/Live % controls) only appear in this mode —
+  there's a real server quota behind them.
 - **Pay-per-token** (`us.anthropic.*` Bedrock / API) → **burn**: `$` spent today + tokens,
   a live burn rate, and the main-vs-sub-agent split. A segmented control picks what the
-  menu bar shows ($ or tokens).
+  menu bar shows ($ or tokens). No cap or Live % UI here — there's no server quota to
+  fetch on pay-per-token, so the log-derived numbers are already the complete picture.
 
 The menu-bar glyph itself is the readability study's "Recommended" treatment: a
 monochrome number (always legible on any wallpaper) plus one colored health dot.
@@ -42,6 +45,11 @@ The dropdown has two tabs under a shared header:
 cd app
 swift run            # menu-bar item appears immediately, live against your real logs
 ```
+`swift run` builds only the bare `TokenTab` binary — there's no bundle, so no
+`TokenTabLiveHelper` and no `Contents/Library/LaunchAgents` plist to register. The app
+notices (`LiveHelperManager.status == .unavailable`) and falls back to showing the
+`adapters/install-live.sh` / `node adapters/write-live.mjs` commands instead of a Live %
+toggle that could never work.
 
 **The real sandboxed app:**
 ```sh
@@ -52,9 +60,14 @@ open "Token Tab.app"
 On first launch the sandboxed app asks you to grant read access to `~/.claude` (a
 one-time security-scoped bookmark; `~/.claude` is hidden, so the picker is opened with
 hidden files shown). The grant is **read-only** and scoped — it can read nothing else and
-write nothing anywhere.
+write nothing anywhere. This build also has the bundled live helper, so **Turn on Live %**
+in the dropdown or Settings works: one click registers
+`Contents/Library/LaunchAgents/com.tokentab.liveagent.plist` via `SMAppService`, and
+launchd runs `Contents/MacOS/TokenTabLiveHelper` on its own timer — see the root
+[`README.md`](../README.md#live-server-) for the full story.
 
-You can also open the package in Xcode (`File ▸ Open ▸ app/Package.swift`) and hit Run.
+You can also open the package in Xcode (`File ▸ Open ▸ app/Package.swift`) and hit Run
+(same as `swift run` — no bundled helper).
 
 ## App icon
 
@@ -79,7 +92,8 @@ codesign -d --entitlements :- "app/Token Tab.app"
 # No network APIs anywhere in the sources (prints nothing):
 grep -RnE "URLSession|Socket|NWConnection|CFSocket|getaddrinfo|https?://" app/Sources
 
-# No subprocess (prints nothing) — the sandboxed app cannot shell out:
+# No subprocess in app/Sources (prints nothing) — the sandboxed app cannot shell out, and
+# the one process that does (the live helper) is deliberately fenced OUTSIDE this tree:
 grep -RnE "Process\(|posix_spawn|NSTask|popen|execv|/bin/" app/Sources
 
 # It never reads your content: the only matches are two comments saying so. The JSONL
@@ -87,6 +101,31 @@ grep -RnE "Process\(|posix_spawn|NSTask|popen|execv|/bin/" app/Sources
 # or code — only token-count metadata:
 grep -RnE "message\.content|\"content\"" app/Sources
 ```
+
+The live helper is the one deliberate exception to "no subprocess," and it's auditable
+on its own terms — a ~200-line file (`app/Helper/main.swift`) outside `app/Sources`,
+and a binary that is ALSO App-Sandboxed (macOS ≥14.2 requires it: a sandboxed app may
+only register sandboxed agents), just with its sandbox opened exactly as far as its one
+job needs:
+
+```sh
+# The app binary: sandbox ON, no network entitlement — same as above, unchanged by Live %:
+codesign -d --entitlements :- "app/Token Tab.app"
+
+# The helper binary: sandbox ON, plus network.client (claude /usage is a network call)
+# and scoped ~/.claude read-write — nothing else. The entitlements file is short; read it
+# at app/Bundle/TokenTabLiveHelper.entitlements:
+codesign -d --entitlements :- "app/Token Tab.app/Contents/MacOS/TokenTabLiveHelper"
+
+# It only ever runs `claude -p "/usage" --output-format json` — this prints exactly ONE
+# line (the single Process() that execs claude); no network API matches at all:
+grep -nE "Process\(|URLSession|Socket" app/Helper/main.swift
+```
+
+It's never spawned by the app — `launchd` runs it, and only after the user registers it
+with `SMAppService` by clicking **Turn on Live %** (visible + revocable afterward in
+System Settings ▸ Login Items). See the root [`README.md`](../README.md#live-server-)
+for the full trust story.
 
 ## Reconcile against the audited JS engine
 
@@ -104,19 +143,34 @@ node ../src/token-tab.mjs --json        # JS engine totals — fields match
 ```
 app/
   Package.swift                 SwiftPM: TokenTabCore (pure) + TokenTab (GUI) + tests
-  Sources/TokenTabCore/         Core.swift / Pricing.swift / Format.swift — pure port of src/
+  Sources/TokenTabCore/         Core.swift / Pricing.swift / Format.swift / LiveParse.swift — pure port of src/
   Sources/TokenTab/
     TokenTabApp.swift           @main MenuBarExtra agent (LSUIElement, no Dock icon)
-    Model/                      LogReader, LiveReader, Access (grant), UsageStore, Config, Probe, FolderWatcher
+    Model/                      LogReader, LiveReader, LiveHelperManager (SMAppService), Access (grant), UsageStore, Config, Probe, FolderWatcher
     Views/                      Theme, Components, MenuBarLabel, SubscriptionPanel, BurnPanel, HistoryPanel, DropdownView, LoadingView, SettingsView
-  Bundle/                       Info.plist (CFBundleIconFile) + TokenTab.entitlements (sandbox, no network)
+  Helper/main.swift             TokenTabLiveHelper source (~200 lines) — NOT sandboxed,
+                                 fenced outside Sources/ so the app/Sources audit stays
+                                 clean. The ONE subprocess in the native stack: runs
+                                 `claude -p "/usage" --output-format json`
+  Bundle/                       Info.plist (CFBundleIconFile) + TokenTab.entitlements
+                                 (sandbox, no network) + com.tokentab.liveagent.plist
+                                 (the bundled LaunchAgent, label com.tokentab.liveagent)
   Branding/                     gauge logo sources (SVG) + generated favicons / wordmark / hero
-  Scripts/build-app.sh          assemble + ad-hoc-sign the .app (regenerates the icon if missing)
+  Scripts/build-app.sh          assemble + sign the .app: helper first (own identifier
+                                 com.tokentab.TokenTabLiveHelper, no entitlements), then
+                                 the app bundle (regenerates the icon if missing)
   Scripts/make-icon.swift       Core Graphics renderer for the gauge mark (iconset / favicon / hero)
   Scripts/make-icon.sh          → Bundle/AppIcon.icns   ·   make-branding.sh → web/README assets
   Tests/TokenTabCoreTests/      core + parity tests ported from ../test/core.test.mjs
   Tests/TokenTabAppTests/       I/O characterization tests (LogReader, RecordCache)
 ```
+
+`build-app.sh` assembles the bundle's `Contents/`, which isn't checked in:
+`Contents/MacOS/TokenTab` (the app binary — sandboxed, no network),
+`Contents/MacOS/TokenTabLiveHelper` (the helper — sandboxed too, with network.client +
+scoped ~/.claude; see `Bundle/TokenTabLiveHelper.entitlements`), and
+`Contents/Library/LaunchAgents/com.tokentab.liveagent.plist` (copied straight from
+`Bundle/`).
 
 ## Status / not yet
 
