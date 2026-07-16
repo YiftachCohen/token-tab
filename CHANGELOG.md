@@ -10,6 +10,12 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 ## [Unreleased]
 
 ### Added
+- **CI now checks value-level rate-table parity and design-token drift.** Two new
+  scripts alongside the trust audit: `.github/scripts/rates-parity.mjs` (the JS and
+  Swift price tables must carry identical numbers, aliases, and cache multipliers) and
+  `.github/scripts/design-lint.sh` (no new raw color/font literals outside
+  `Theme.swift`; pre-existing ones are baselined as migration TODOs). No trust-surface
+  change — these only tighten enforcement of existing rules.
 - **One-click Live %.** The `.app` now bundles a live-usage helper
   (`Contents/MacOS/TokenTabLiveHelper`, source fenced at `app/Helper/main.swift`) plus a
   LaunchAgent plist (`Contents/Library/LaunchAgents/com.tokentab.liveagent.plist`).
