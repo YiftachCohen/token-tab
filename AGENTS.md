@@ -66,17 +66,32 @@ so pin them only where a fixture is timezone-independent.)
    update `total`, `bySurface`, and `cost.total`.
 4. `node --test && swift test --package-path app` — the coverage tests
    (`test/rates-coverage.test.mjs`, `RatesCoverageTests.swift`) fail loudly if
-   any of the three is missing.
+   any of the three is missing — then `node .github/scripts/rates-parity.mjs`,
+   which catches value drift the key-level coverage can't.
 
 ## Build / test / audit
 
 ```sh
-node --test                       # JS engine tests (also the CLI/IO tests)
-swift test --package-path app     # Swift engine parity tests
+node --test                            # JS engine tests (also the CLI/IO tests)
+swift test --package-path app          # Swift engine parity tests
+bash .github/scripts/trust-audit.sh    # the invariant greps, as one script
+node .github/scripts/rates-parity.mjs  # value-level JS↔Swift rate-table drift check
+bash .github/scripts/design-lint.sh    # no new raw color/font literals outside Theme.swift
 ```
 
-CI runs both, plus an `audit` job that re-runs the invariant greps above and fails
-if any is non-empty. Run the greps yourself before pushing.
+CI (`ci.yml`) runs all of these; the `audit` job fails if any grep is non-empty. A
+Claude Code hook (`.claude/hooks/guard-audited-trees.sh`, wired in `.claude/settings.json`)
+re-runs the audit + design lint automatically after any edit to `src/`, `app/Sources/`,
+or `package.json`, so violations surface at edit time — but run the suite yourself
+before pushing anyway.
+
+The design lint is a ratchet: literals that predate it are listed in
+`.github/scripts/design-lint-baseline.txt` (each is a migration TODO — move it into
+`Theme.swift` and delete its line). Never add to the baseline.
+
+**Skills** (Claude Code, in `.claude/skills/`): `release` — the full RELEASING.md flow
+with the signing/npm/Homebrew gotchas baked in; `add-model` — the rate checklist below,
+executable.
 
 ## Layout
 

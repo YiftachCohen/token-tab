@@ -39,6 +39,15 @@ jobs:
       - name: The two-minute audit must stay empty
         run: bash .github/scripts/trust-audit.sh
 
+      # AGENTS.md's "edit the price tables in lockstep" rule, as numbers-level checks
+      # the coverage fixture can't express (value drift, input/output split, multipliers).
+      - name: Rate tables mirrored (JS ↔ Swift)
+        run: node .github/scripts/rates-parity.mjs
+
+      # DESIGN.md's token rule: no new raw color/font literals outside Theme.swift.
+      - name: Design tokens stay in Theme.swift
+        run: bash .github/scripts/design-lint.sh
+
   swift:
     name: swift parity (macos, ${{ matrix.tz }})
     runs-on: macos-latest
