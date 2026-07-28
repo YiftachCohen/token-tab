@@ -130,7 +130,7 @@ func resolveClaude() -> URL? {
 /// directory and indexes it; under launchd the cwd is $HOME, so it would walk into
 /// ~/Desktop / ~/Documents and trip macOS's TCC consent prompts. /usage reads the server
 /// quota, never local files — an empty tmpdir gives it nothing to scan.
-func runClaudeUsage(bin: URL, timeout: TimeInterval = 30) -> String? {
+func runClaudeUsage(bin: URL, timeout: TimeInterval = 60) -> String? {
     let tmp = fm.temporaryDirectory.appendingPathComponent("token-tab-live-\(getpid())", isDirectory: true)
     try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
     defer { try? fm.removeItem(at: tmp) }
@@ -156,7 +156,13 @@ func runClaudeUsage(bin: URL, timeout: TimeInterval = 30) -> String? {
 
     // Watchdog: SIGTERM past the deadline. Terminating also closes the pipe, so the
     // read below can never hang forever.
-    let watchdog = DispatchWorkItem { if proc.isRunning { proc.terminate() } }
+    let timeoutState = TimeoutState()
+    let watchdog = DispatchWorkItem {
+        if proc.isRunning {
+            timeoutState.markTimedOut()
+            proc.terminate()
+        }
+    }
     DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
 
     // Drain stdout BEFORE waitUntilExit (a full pipe buffer would deadlock the child).
@@ -165,12 +171,30 @@ func runClaudeUsage(bin: URL, timeout: TimeInterval = 30) -> String? {
     watchdog.cancel()
 
     guard proc.terminationStatus == 0 else {
-        log(proc.terminationReason == .uncaughtSignal
+        log(timeoutState.didTimeOut
             ? "claude timed out after \(Int(timeout))s"
             : "claude exited \(proc.terminationStatus)")
         return nil
     }
     return String(data: data.prefix(256 * 1024), encoding: .utf8)
+}
+
+/// `Process.terminate()` can make a CLI wrapper report exit 143 instead of an uncaught
+/// signal. Keep the watchdog's cause so the log distinguishes our bounded timeout from a
+/// real Claude failure.
+final class TimeoutState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var timedOut = false
+
+    func markTimedOut() {
+        lock.lock(); defer { lock.unlock() }
+        timedOut = true
+    }
+
+    var didTimeOut: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return timedOut
+    }
 }
 
 // MARK: - serialize + atomic write (mirrors serializeLive / writeLiveCache)

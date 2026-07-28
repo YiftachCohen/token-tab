@@ -174,8 +174,12 @@ final class CoreTests: XCTestCase {
         let now = date("2026-06-23T10:00:00Z")
         XCTAssertTrue(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:55:00Z")).isFresh(now: now),
                       "5 minutes old is fresh")
+        XCTAssertTrue(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:54:00Z")).isFresh(now: now),
+                      "one-minute scheduling slack remains fresh after the expected 5-minute cadence")
+        XCTAssertFalse(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:53:59Z")).isFresh(now: now),
+                       "a missed helper run must not keep posing as live")
         XCTAssertFalse(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:30:00Z")).isFresh(now: now),
-                       "30 minutes old is stale (default 10m TTL)")
+                       "30 minutes old is stale")
         XCTAssertTrue(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T10:00:30Z")).isFresh(now: now),
                       "tolerate minor clock skew (sidecar slightly ahead)")
         XCTAssertFalse(LiveUsage(sessionPct: 9, capturedAt: nil).isFresh(now: now),
