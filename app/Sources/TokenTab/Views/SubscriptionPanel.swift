@@ -62,6 +62,13 @@ struct SubscriptionPanel: View {
         return t
     }
 
+    private var staleLiveDetail: String {
+        guard let capturedAt = snapshot.live?.capturedAt else {
+            return "Live · stale — no successful reading yet"
+        }
+        return "Live · stale — last successful reading \(Fmt.duration(now.timeIntervalSince(capturedAt))) ago"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // HERO — the gauge is the centered hero; the runway sits beneath it, then the
@@ -288,8 +295,7 @@ struct SubscriptionPanel: View {
             // seconds away) or when readings stopped (claude signed out, machine asleep…).
             HStack(spacing: 6) {
                 Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
-                Text(snapshot.live == nil ? "Live: on · waiting for the first reading…"
-                                          : "Live · stale — refreshes every ~5 min")
+                Text(snapshot.live == nil ? "Live: on · waiting for the first reading…" : staleLiveDetail)
                     .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
                 Spacer(minLength: 0)
             }

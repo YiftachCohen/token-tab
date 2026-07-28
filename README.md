@@ -243,8 +243,9 @@ no network entitlement, unchanged. What the click does:
   you already granted, ignored by both log walkers (hidden and not `*.jsonl`). The app
   reads that file as plain data.
 - **Fails closed.** If `claude` can't be resolved, times out, or its output format
-  changes, the helper writes nothing and the app falls back to the local estimate,
-  showing a gray `live unavailable` line. Every run appends one line to
+  changes, the helper writes nothing and the app falls back to the local estimate. A
+  missed five-minute refresh is marked stale after one minute of scheduling slack and
+  shows when the last successful reading landed. Every run appends one line to
   `~/Library/Logs/token-tab-live.log` (self-trims at 64KB) — useful for diagnosing why a
   reading didn't land.
 - **Honors the same config** as everything else: `TOKENTAB_CLAUDE_BIN`,
