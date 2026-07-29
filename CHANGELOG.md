@@ -9,6 +9,8 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-29
+
 ### Added
 - **Claude Opus 5 (`claude-opus-5`) added to the rate table** at its list price of
   $5 / 1M input and $25 / 1M output — the same rate as Opus 4.8, so no existing cost
