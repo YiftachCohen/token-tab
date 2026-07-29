@@ -27,7 +27,21 @@ struct MenuBarLabel: View {
         }
     }
 
+    /// The provider under most 5h-quota pressure, recomputed only when the snapshot ticks
+    /// (30s) — no intra-tick flapping. Codex only wins when it has usage AND a higher REAL %.
+    private var headline: Provider { snapshot.headlineProvider(now: now) }
+    private var isCodex: Bool { headline == .codex }
+
     private var glyph: NSImage {
+        // The indigo ring requires a REAL official % — Codex can headline without one (the
+        // both-nil today-tokens fallback), and then glyph and text must both take the
+        // mode-based path so the ring never contradicts the number beside it.
+        if isCodex, snapshot.codexUsedPct != nil {
+            // Codex headlines its OFFICIAL 5h % (a real number) → a ring in the indigo accent,
+            // filled to % LEFT (mirrors the panel hero). Uses .indigo, not a health color, since
+            // Codex has no green/amber runway-health semantic.
+            return MenuGlyph.ring(fraction: codexRingFraction, arc: NSColor(Theme.indigo))
+        }
         switch snapshot.mode {
         case .subscription:
             return MenuGlyph.ring(fraction: ringFraction, arc: NSColor(snapshot.health.color))
@@ -43,7 +57,13 @@ struct MenuBarLabel: View {
         return snapshot.agg.window.timeLeftFraction(now: now) ?? 0
     }
 
+    /// Codex ring: fraction LEFT of the official 5h limit (100 − usedPct).
+    private var codexRingFraction: Double { Double(snapshot.codexLeftPct ?? 0) / 100 }
+
     private var text: String {
+        // Codex focus: the official 5h "% used", with a "Cdx" suffix so the number is
+        // unambiguous even at a glance (e.g. "42% Cdx"). Codex always has a real % here.
+        if isCodex, let used = snapshot.codexUsedPct { return "\(used)% Cdx" }
         switch snapshot.mode {
         case .subscription:
             // A "%" only when it's a real quota % (live or cap). Otherwise show the time left
@@ -51,6 +71,8 @@ struct MenuBarLabel: View {
             if let q = snapshot.quotaLeft(now: now) { return "\(q.pct)%" }
             let w = snapshot.agg.window
             if w.active { return Fmt.durationCompact(w.secondsToReset(now: now)) }
+            // No Claude runway either — fall back to combined today-tokens (both-empty case).
+            if snapshot.codexHasUsage || snapshot.agg.today > 0 { return Fmt.millions(snapshot.agg.today) }
             return "—"
         case .burn:
             switch menuMetric {

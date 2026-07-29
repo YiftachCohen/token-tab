@@ -1,0 +1,15 @@
+{
+  "desc": "Half-written trailing line (live tail): the malformed line is counted and skipped, everything before it still folds. Uses rawLines so we can inject a non-JSON string.",
+  "fileName": "rollout-2026-06-20T19-00-00-019ee800-0000-7000-8000-000000000003.jsonl",
+  "rawLines": [
+    "{\"type\":\"session_meta\",\"timestamp\":\"2026-06-20T19:00:00.000Z\",\"payload\":{\"id\":\"019ee800-0000-7000-8000-000000000003\"}}",
+    "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.4\"}}",
+    "{\"type\":\"event_msg\",\"timestamp\":\"2026-06-20T19:01:00.000Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":300,\"cached_input_tokens\":100,\"output_tokens\":50,\"total_tokens\":350}},\"rate_limits\":null}}",
+    "{\"type\":\"event_msg\",\"timestamp\":\"2026-06-20T19:02:00.000Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_to"
+  ],
+  "expected": [
+    { "messageId": "codex:019ee800-0000-7000-8000-000000000003", "requestId": "token:0", "model": "gpt-5.4", "usage": { "input_tokens": 200, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0, "output_tokens": 50 }, "timestamp": "2026-06-20T19:01:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 1,
+  "rateLimits": null
+}

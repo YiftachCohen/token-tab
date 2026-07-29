@@ -1,0 +1,16 @@
+{
+  "desc": "token_count events with null payload.info are skipped (no record, not malformed). A valid event around them still folds normally.",
+  "fileName": "rollout-2026-06-20T13-15-32-019ee4be-3b0c-7e20-8f0f-32e5d911d86f.jsonl",
+  "lines": [
+    { "type": "session_meta", "timestamp": "2026-06-20T13:15:32.000Z", "payload": { "id": "019ee4be-3b0c-7e20-8f0f-32e5d911d86f" } },
+    { "type": "turn_context", "payload": { "model": "gpt-5.4" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T13:16:00.000Z", "payload": { "type": "token_count", "info": null, "rate_limits": null } },
+    { "type": "event_msg", "timestamp": "2026-06-20T13:17:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 300, "cached_input_tokens": 100, "output_tokens": 50, "total_tokens": 350 } }, "rate_limits": null } },
+    { "type": "event_msg", "timestamp": "2026-06-20T13:18:00.000Z", "payload": { "type": "token_count", "info": null, "rate_limits": null } }
+  ],
+  "expected": [
+    { "messageId": "codex:019ee4be-3b0c-7e20-8f0f-32e5d911d86f", "requestId": "token:0", "model": "gpt-5.4", "usage": { "input_tokens": 200, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0, "output_tokens": 50 }, "timestamp": "2026-06-20T13:17:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 0,
+  "rateLimits": null
+}

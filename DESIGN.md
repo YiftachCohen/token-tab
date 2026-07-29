@@ -126,6 +126,11 @@ glass, and numbers. Values below are the `Theme.swift` tokens (light / dark).
 | 2026-06-30 | **Burn-history bars amber** (not green) | A cost chart must honor color-as-mode; green bars on a $ chart cross-wired green=health / amber=cost |
 | 2026-06-30 | Burn by-model shows **cost-share %** + sorted by spend | Rank and proportion at a glance; ties each row to the cost-share bar |
 | 2026-06-30 | **Removed main-vs-sub-agent** from the burn panel | In pay-per-token, "which model cost me money" is the real question |
+| 2026-07-05 | **Two-gauge Overview, never a combined quota gauge** | Focused provider is the hero gauge; the other provider (when it has usage) is a compact hairline secondary row that swaps focus on tap — a zero-usage provider is hidden. A merged Claude+Codex % is mathematically fake (both blind designs agreed), so it's banned |
+| 2026-07-05 | **Max-pressure headline rule** (menu bar + Overview focus) | The provider under most 5h pressure headlines, but ONLY real percentages compete — Codex's official `used_percent`, Claude's % only with a configured/calibrated cap or live reading. Inferred time-left never competes; neither has a real % → fall back to combined today-tokens. Re-ranked only on the 30s refresh tick (no intra-tick flapping) |
+| 2026-07-05 | **`Cdx` suffix on the Codex menu-bar label** | When Codex is the focused provider the menu bar reads e.g. `◧ 42% Cdx`, so the number is unambiguous at a glance without a second glyph |
+| 2026-07-05 | **Indigo = Codex** across every surface | The existing indigo token is Codex's accent everywhere (hero ring, secondary row, history bars, header pill, by-model dots). Claude keeps green/amber-by-surface; Codex has no runway-health semantic, so its ring is flat indigo, not health-tinted |
+| 2026-07-05 | **Codex staleness affordance** | Codex's official % is only as fresh as the newest `token_count`; past ~10 min the hero shows a subtle "as of HH:MM" line instead of implying a live reading |
 
 ## Where this lives in code
 - **Tokens:** `app/Sources/TokenTab/Views/Theme.swift`

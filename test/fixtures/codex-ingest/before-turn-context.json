@@ -1,0 +1,16 @@
+{
+  "desc": "token_count arrives before any turn_context -> model is <codex-unknown> (marks aggregate approximate). A later turn_context applies to subsequent events only.",
+  "fileName": "rollout-2026-06-20T16-30-00-019ee570-0000-7000-8000-000000000000.jsonl",
+  "lines": [
+    { "type": "session_meta", "timestamp": "2026-06-20T16:30:00.000Z", "payload": { "id": "019ee570-0000-7000-8000-000000000000" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T16:31:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 200, "cached_input_tokens": 80, "output_tokens": 40, "total_tokens": 240 } }, "rate_limits": null } },
+    { "type": "turn_context", "payload": { "model": "gpt-5.4" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T16:32:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 500, "cached_input_tokens": 180, "output_tokens": 90, "total_tokens": 590 } }, "rate_limits": null } }
+  ],
+  "expected": [
+    { "messageId": "codex:019ee570-0000-7000-8000-000000000000", "requestId": "token:0", "model": "<codex-unknown>", "usage": { "input_tokens": 120, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 0, "output_tokens": 40 }, "timestamp": "2026-06-20T16:31:00.000Z", "provider": "codex", "isSidechain": false },
+    { "messageId": "codex:019ee570-0000-7000-8000-000000000000", "requestId": "token:1", "model": "gpt-5.4", "usage": { "input_tokens": 200, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0, "output_tokens": 50 }, "timestamp": "2026-06-20T16:32:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 0,
+  "rateLimits": null
+}

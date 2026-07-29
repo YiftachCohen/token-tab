@@ -19,11 +19,30 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { aggregate, recordFromLine, classifySurface } from "./core.mjs";
 import { costOfUsage } from "./pricing.mjs";
+import { readCodexUsage, resolveCodexRoot } from "./codex.mjs";
 
 function resolveLogDir() {
   if (process.env.TOKENTAB_LOG_DIR) return process.env.TOKENTAB_LOG_DIR;
   if (process.env.CLAUDE_CONFIG_DIR) return join(process.env.CLAUDE_CONFIG_DIR, "projects");
   return join(homedir(), ".claude", "projects");
+}
+
+// Provider gating (design doc section 1): $TOKENTAB_PROVIDERS is "all" or a comma
+// list of provider names; default = every provider whose log dir exists. A
+// requested-but-missing dir is silently skipped — never an error — so the tool
+// still works before you've ever used one of the two CLIs.
+function resolveEnabledProviders(env, { claudeDir, codexDir }) {
+  const claudeDirExists = existsSync(claudeDir);
+  const codexDirExists = existsSync(codexDir);
+  const raw = (env.TOKENTAB_PROVIDERS || "").trim().toLowerCase();
+  if (!raw || raw === "all") {
+    return { claude: claudeDirExists, codex: codexDirExists };
+  }
+  const requested = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+  return {
+    claude: requested.has("claude") && claudeDirExists,
+    codex: requested.has("codex") && codexDirExists,
+  };
 }
 
 // Load machine-local settings (e.g. TOKENTAB_WINDOW_CAP) from a KEY=VALUE file kept
@@ -133,6 +152,27 @@ function fmtUsd(n) {
   return "$" + n.toFixed(2);
 }
 
+// "HH:MM" in local time, for the official Codex window reset lines (e.g. "resets 14:35").
+function fmtClock(ms) {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// Most-pressured-provider headline (design doc §6): only REAL percentages compete —
+// Codex's official used_percent, and Claude's % only when a cap (TOKENTAB_WINDOW_CAP)
+// makes agg.window.pct real. Inferred time-left never competes with a quota-%. Returns
+// {provider, pct} for whichever is more pressured, or null when neither has a real %.
+function realPct(agg) {
+  const candidates = [];
+  if (agg.window && agg.window.pct != null) candidates.push({ provider: "claude", pct: agg.window.pct });
+  const codexPrimary = agg.providers?.codex?.windows?.primary;
+  if (codexPrimary && codexPrimary.usedPct != null)
+    candidates.push({ provider: "codex", pct: codexPrimary.usedPct });
+  if (!candidates.length) return null;
+  return candidates.reduce((best, c) => (c.pct > best.pct ? c : best));
+}
+
 function dominantSurface(bySurface) {
   let best = null,
     bestN = -1;
@@ -186,8 +226,10 @@ async function main() {
       ? "swiftbar"
       : "report";
   const dir = resolveLogDir();
+  const codexRoot = resolveCodexRoot(process.env);
+  const enabled = resolveEnabledProviders(process.env, { claudeDir: dir, codexDir: codexRoot });
 
-  if (!existsSync(dir)) {
+  if (!enabled.claude && !enabled.codex) {
     if (mode === "swiftbar") {
       console.log("Token Tab —");
       console.log("---");
@@ -200,14 +242,35 @@ async function main() {
     process.exit(0);
   }
 
-  const files = findJsonl(dir);
-  const { records, parseErrors } = await readRecords(files);
+  // Claude: read as today (findJsonl walks TOKENTAB_LOG_DIR/CLAUDE_CONFIG_DIR/~/.claude/projects).
+  const files = enabled.claude ? findJsonl(dir) : [];
+  const { records: claudeRecords, parseErrors } = enabled.claude
+    ? await readRecords(files)
+    : { records: [], parseErrors: [] };
+
+  // Codex: read + fold via the reader in src/codex.mjs (design doc §2). Malformed
+  // lines merge into the same parse-health line as Claude's — both are "tolerated,
+  // counted" rather than fatal. codexRateLimits (the newest official rate_limits
+  // snapshot) is passed out-of-band into aggregate(); it is formatting data only,
+  // never summed into any token/dollar total.
+  let codexMalformed = 0;
+  let codexRateLimits = null;
+  let codexRecords = [];
+  if (enabled.codex) {
+    const r = await readCodexUsage(codexRoot);
+    codexRecords = r.records;
+    codexMalformed = r.malformed;
+    codexRateLimits = r.codexRateLimits;
+  }
+
+  const records = [...claudeRecords, ...codexRecords];
   const cap = Number(process.env.TOKENTAB_WINDOW_CAP);
   // Dollars are local-only arithmetic on a bundled price table — no network, no key —
   // so the estimate is on by default (unlike the live server-%, which is opt-in).
   const agg = aggregate(records, {
     cap: Number.isFinite(cap) && cap > 0 ? cap : undefined,
     cost: costOfUsage,
+    codexRateLimits: codexRateLimits || undefined,
   });
 
   // Opt-in live usage. Computed ONCE, before any render branch, and only when
@@ -228,7 +291,9 @@ async function main() {
   if (mode === "json") {
     // Default (flag unset) output stays byte-for-byte identical: `live` is only
     // appended when present, never as `live: null`, and `window` is untouched.
-    const out = { ...agg, files: files.length, parseErrors: parseErrors.length };
+    // Malformed counts merge across providers — both are "tolerated, counted" the
+    // same way, so one combined figure is the honest parse-health number.
+    const out = { ...agg, files: files.length, parseErrors: parseErrors.length + codexMalformed };
     if (live) out.live = live;
     console.log(JSON.stringify(out, null, 2));
     return;
@@ -239,10 +304,20 @@ async function main() {
   const w = agg.window;
 
   if (mode === "swiftbar") {
-    // Local default: the headline is tokens (today). The 5h window — exact reset
-    // countdown, plus a % only if you've set a cap — lives in the dropdown. All local,
-    // no network. (A live server-% is a future opt-in that would phone home.)
-    console.log(`◧ ${abbrev(agg.today)}`);
+    // Headline rule (design doc §6): only REAL percentages compete for the menu-bar
+    // label — Codex's official used_percent, and Claude's % only when a configured
+    // cap makes agg.window.pct real. The most-pressured provider wins; a Codex-led
+    // headline gets a "Cdx" suffix so a Claude % and a Codex % are never ambiguous
+    // at a glance. Inferred time-left never competes with a real %. Neither provider
+    // has a real % (the common case: no TOKENTAB_WINDOW_CAP, Codex absent/disabled)
+    // falls back to the current behavior: combined today tokens.
+    const pressure = realPct(agg);
+    if (pressure) {
+      const suffix = pressure.provider === "codex" ? " Cdx" : "";
+      console.log(`◧ ${pressure.pct}%${suffix}`);
+    } else {
+      console.log(`◧ ${abbrev(agg.today)}`);
+    }
     console.log("---");
     if (surface === "subscription") {
       if (live) {
@@ -278,8 +353,26 @@ async function main() {
     }
     console.log("---");
     for (const [s, n] of Object.entries(agg.bySurface)) console.log(`${s}: ${n.toLocaleString()}`);
+
+    // Codex section: only when Codex has usage (records or an official snapshot),
+    // showing its official 5h + weekly windows — never an inferred/local %, Codex's
+    // percentages are always the real server-side ones.
+    const codexP = agg.providers?.codex;
+    if (codexP && (codexP.total > 0 || codexP.windows)) {
+      console.log("---");
+      console.log("Codex —");
+      const cw = codexP.windows || {};
+      if (cw.primary)
+        console.log(`  5h window: ${cw.primary.usedPct}% used · resets ${fmtClock(cw.primary.resetAt)} · official`);
+      if (cw.secondary)
+        console.log(`  This week: ${cw.secondary.usedPct}% used · resets ${fmtClock(cw.secondary.resetAt)} · official`);
+      console.log(`  Today: ${codexP.today.toLocaleString()} tokens | color=gray`);
+    }
     console.log("---");
-    console.log("Local only · No network · ~/.claude/projects read-only | color=gray");
+    const trust = enabled.codex
+      ? "Local only · No network · reads ~/.claude + ~/.codex | color=gray"
+      : "Local only · No network · ~/.claude/projects read-only | color=gray";
+    console.log(trust);
     return;
   }
 
@@ -336,6 +429,43 @@ async function main() {
   line("  By token class:");
   line(`    input ${abbrev(agg.byClass.input)}  ·  cache-create ${abbrev(agg.byClass.cacheCreate)}  ·  cache-read ${abbrev(agg.byClass.cacheRead)}  ·  output ${abbrev(agg.byClass.output)}`);
   line("");
+
+  // Per-provider sections (design doc §5): combined totals above are "all coding
+  // usage"; each provider's own subtotal follows. Claude's section always shows
+  // (it's the tool's original scope); Codex's section appears only when Codex has
+  // usage — either records or an official rate-limits snapshot.
+  for (const p of agg.providerOrder) {
+    const pb = agg.providers[p];
+    if (p === "claude") {
+      line(`  Claude ${"─".repeat(43)}`);
+      line(`    Today:     ${abbrev(pb.today).padStart(8)}   (${pb.today.toLocaleString()} tokens)`);
+      line(`    This week: ${abbrev(pb.thisWeek).padStart(8)}   (${pb.thisWeek.toLocaleString()})`);
+      line(`    Last 5h:   ${abbrev(pb.rolling5h).padStart(8)}   (${pb.rolling5h.toLocaleString()})`);
+      line(`    All time:  ${abbrev(pb.total).padStart(8)}   (${pb.total.toLocaleString()})`);
+      line("");
+    } else if (p === "codex" && (pb.total > 0 || pb.windows)) {
+      line(`  Codex ${"─".repeat(44)}`);
+      line(`    Today:     ${abbrev(pb.today).padStart(8)}   (${pb.today.toLocaleString()} tokens)`);
+      line(`    This week: ${abbrev(pb.thisWeek).padStart(8)}   (${pb.thisWeek.toLocaleString()})`);
+      line(`    Last 5h:   ${abbrev(pb.rolling5h).padStart(8)}   (${pb.rolling5h.toLocaleString()})`);
+      line(`    All time:  ${abbrev(pb.total).padStart(8)}   (${pb.total.toLocaleString()})`);
+      line("");
+      const cw = pb.windows || {};
+      if (cw.primary)
+        line(`    5h window: ${cw.primary.usedPct}% used · resets ${fmtClock(cw.primary.resetAt)} · official`);
+      if (cw.secondary)
+        line(`    This week: ${cw.secondary.usedPct}% used · resets ${fmtClock(cw.secondary.resetAt)} · official`);
+      if (pb.plan?.planType) line(`    Plan: ${pb.plan.planType}`);
+      if (cw.primary || cw.secondary) line("");
+      const codexModels = Object.entries(pb.byModel).sort((a, b) => b[1] - a[1]);
+      if (codexModels.length) {
+        line("    By model:");
+        for (const [m, n] of codexModels.slice(0, 8)) line(`      ${m.padEnd(26)} ${abbrev(n).padStart(8)}`);
+        line("");
+      }
+    }
+  }
+
   line("  Parse health " + "─".repeat(38));
   line(`    files:                 ${files.length}`);
   line(`    usage records counted: ${agg.dedup.counted.toLocaleString()}`);
@@ -343,7 +473,13 @@ async function main() {
   line(`    keep-last revisions (normal for streaming): ${agg.dedup.collisionsDifferingTotals}`);
   line(`    approximate (missing id): ${agg.approximate}`);
   line(`    untracked: ${agg.untracked.requests} requests / ${abbrev(agg.untracked.tokens)} tokens`);
-  line(`    malformed lines skipped: ${parseErrors.length}`);
+  line(`    malformed lines skipped: ${parseErrors.length + codexMalformed}`);
+  line("");
+  line(
+    enabled.codex
+      ? "  0 network calls · reads ~/.claude + ~/.codex"
+      : "  0 network calls · reads ~/.claude",
+  );
   line("");
 }
 

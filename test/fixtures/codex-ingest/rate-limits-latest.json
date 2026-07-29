@@ -1,0 +1,18 @@
+{
+  "desc": "rate_limits latest-wins within a file: two non-null snapshots, the later-timestamped one is the file's snapshot. asOf = the token_count event timestamp. A trailing null rate_limits does not clear it.",
+  "fileName": "rollout-2026-06-20T18-00-00-019ee700-0000-7000-8000-000000000002.jsonl",
+  "lines": [
+    { "type": "session_meta", "timestamp": "2026-06-20T18:00:00.000Z", "payload": { "id": "019ee700-0000-7000-8000-000000000002" } },
+    { "type": "turn_context", "payload": { "model": "gpt-5.4" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T18:01:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 100, "cached_input_tokens": 0, "output_tokens": 20, "total_tokens": 120 } }, "rate_limits": { "primary": { "used_percent": 10.0, "window_minutes": 300, "resets_at": 1774580813 }, "secondary": { "used_percent": 20.0, "window_minutes": 10080, "resets_at": 1774710301 }, "plan_type": "plus" } } },
+    { "type": "event_msg", "timestamp": "2026-06-20T18:05:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 200, "cached_input_tokens": 0, "output_tokens": 40, "total_tokens": 240 } }, "rate_limits": { "primary": { "used_percent": 42.0, "window_minutes": 300, "resets_at": 1774590000 }, "secondary": { "used_percent": 55.0, "window_minutes": 10080, "resets_at": 1774720000 }, "plan_type": "plus" } } },
+    { "type": "event_msg", "timestamp": "2026-06-20T18:06:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 210, "cached_input_tokens": 0, "output_tokens": 42, "total_tokens": 252 } }, "rate_limits": null } }
+  ],
+  "expected": [
+    { "messageId": "codex:019ee700-0000-7000-8000-000000000002", "requestId": "token:0", "model": "gpt-5.4", "usage": { "input_tokens": 100, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 20 }, "timestamp": "2026-06-20T18:01:00.000Z", "provider": "codex", "isSidechain": false },
+    { "messageId": "codex:019ee700-0000-7000-8000-000000000002", "requestId": "token:1", "model": "gpt-5.4", "usage": { "input_tokens": 100, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 20 }, "timestamp": "2026-06-20T18:05:00.000Z", "provider": "codex", "isSidechain": false },
+    { "messageId": "codex:019ee700-0000-7000-8000-000000000002", "requestId": "token:2", "model": "gpt-5.4", "usage": { "input_tokens": 10, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 2 }, "timestamp": "2026-06-20T18:06:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 0,
+  "rateLimits": { "primary": { "used_percent": 42.0, "window_minutes": 300, "resets_at": 1774590000 }, "secondary": { "used_percent": 55.0, "window_minutes": 10080, "resets_at": 1774720000 }, "plan_type": "plus", "asOf": "2026-06-20T18:05:00.000Z" }
+}

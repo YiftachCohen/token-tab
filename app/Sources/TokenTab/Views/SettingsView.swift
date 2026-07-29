@@ -12,6 +12,7 @@ import TokenTabCore
 
 struct SettingsView: View {
     @ObservedObject var store: UsageStore
+    @ObservedObject var access: AccessManager
     var now: Date
     var onClose: () -> Void
 
@@ -48,6 +49,35 @@ struct SettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 modePicker
+            }
+            .padding(.horizontal, 17).padding(.top, 14)
+
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
+
+            // PROVIDERS — which coding tools' local logs Token Tab reads. Claude is the app's
+            // foundation (its ~/.claude grant IS the app), so it's always on; Codex is opt-in
+            // and needs its own read-only grant of ~/.codex (same mechanism, not a wider scope).
+            VStack(alignment: .leading, spacing: 9) {
+                SectionLabel(text: "PROVIDERS")
+                providerRow(name: "Claude", accent: Theme.green, on: .constant(true), locked: true,
+                            detail: "~/.claude · always on")
+                providerRow(name: "Codex", accent: Theme.indigo, on: $store.codexEnabled, locked: false,
+                            detail: codexDetail)
+                if store.codexEnabled, store.codexDirExists, !access.codexGranted {
+                    // ~/.codex exists but the sandbox has no scope yet → offer the grant (mirrors
+                    // the first-run ~/.claude grant). Unsandboxed dev reads it directly (no grant).
+                    Button {
+                        if access.requestCodexAccess() { store.accessChanged() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.badge.plus").font(.system(size: 11))
+                            Text("Grant read access to ~/.codex").font(.system(size: 11, weight: .semibold))
+                            Spacer(minLength: 6)
+                        }
+                        .foregroundStyle(Theme.indigo).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 17).padding(.top, 14)
 
@@ -163,6 +193,31 @@ struct SettingsView: View {
 
     private func commitCap() {
         store.capOverride = Int(capText.filter(\.isNumber)) ?? 0
+    }
+
+    /// One provider row: an accent dot, the name, a one-line status, and a toggle (locked
+    /// on for Claude — the app's core grant). A green-tinted Switch matches the panel.
+    private func providerRow(name: String, accent: Color, on: Binding<Bool>, locked: Bool, detail: String) -> some View {
+        HStack(spacing: 9) {
+            Circle().fill(accent).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(detail).font(.system(size: 10)).foregroundStyle(Theme.faint)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: on).labelsHidden().toggleStyle(.switch).tint(accent)
+                .disabled(locked)
+                .accessibilityLabel("\(name) provider")
+        }
+    }
+
+    /// Codex's one-line status under the toggle: whether logs exist and are readable.
+    private var codexDetail: String {
+        if !store.codexDirExists { return "~/.codex not found — nothing to read" }
+        if store.codexEnabled && access.codexGranted { return "~/.codex · granted" }
+        if store.codexEnabled { return "~/.codex · read access needed" }
+        return "~/.codex · disabled"
     }
 
     // Absolute, cwd-independent install commands when we can locate the repo's adapters/ dir

@@ -45,6 +45,16 @@ final class ParityTests: XCTestCase {
         return ParityTests.isoFrac.date(from: s) ?? ParityTests.isoNoFrac.date(from: s)
     }
 
+    /// resets_at in real Codex logs is numeric epoch SECONDS; asOf is an ISO string.
+    /// Accept both so fixtures can pin the production shape.
+    private func parseEpochOrDate(_ v: Any?) -> Date? {
+        if let n = v as? NSNumber, !(v is Bool) {
+            let d = n.doubleValue
+            return Date(timeIntervalSince1970: d >= 1e12 ? d / 1000 : d)
+        }
+        return parseDate(v as? String)
+    }
+
     func testParityFixtures() throws {
         let dir = fixturesDir()
         let fm = FileManager.default
@@ -91,10 +101,28 @@ final class ParityTests: XCTestCase {
                 model: (r["model"] as? String) ?? "<unknown>",
                 usage: usage,
                 timestamp: parseDate(r["timestamp"] as? String),
-                isSidechain: (r["isSidechain"] as? Bool) ?? false)
+                isSidechain: (r["isSidechain"] as? Bool) ?? false,
+                provider: r["provider"] as? String)
         }
 
-        let agg = aggregate(records, options: AggregateOptions(now: now, cap: cap), costModel: Pricing())
+        let codexRateLimits: CodexRateLimitsSnapshot? = (root["codexRateLimits"] as? [String: Any]).map { snap in
+            func parseWindow(_ raw: Any?) -> CodexRateLimitsSnapshot.Window? {
+                guard let w = raw as? [String: Any], let pct = w["used_percent"] as? Double else { return nil }
+                return CodexRateLimitsSnapshot.Window(
+                    usedPercent: pct,
+                    resetsAt: parseEpochOrDate(w["resets_at"]),
+                    windowMinutes: w["window_minutes"] as? Int)
+            }
+            return CodexRateLimitsSnapshot(
+                primary: parseWindow(snap["primary"]),
+                secondary: parseWindow(snap["secondary"]),
+                planType: snap["plan_type"] as? String,
+                asOf: parseDate(snap["asOf"] as? String))
+        }
+
+        let agg = aggregate(records,
+                             options: AggregateOptions(now: now, cap: cap, codexRateLimits: codexRateLimits),
+                             costModel: Pricing())
         let e = (root["expect"] as? [String: Any]) ?? [:]
 
         // Whole-token scalars (assert only the ones this fixture pins; these are never
@@ -157,6 +185,81 @@ final class ParityTests: XCTestCase {
                     XCTAssertEqual(Set(aggCost.byModel.keys), Set(expected.keys), "cost.byModel keys \(ctx)")
                     for (k, v) in expected {
                         XCTAssertEqual(aggCost.byModel[k] ?? .nan, v, accuracy: 1e-9, "cost.byModel[\(k)] \(ctx)")
+                    }
+                }
+            }
+        }
+
+        if let expectedOrder = e["providerOrder"] as? [String] {
+            XCTAssertEqual(agg.providerOrder, expectedOrder, "providerOrder \(ctx)")
+        }
+
+        if let providersExpect = e["providers"] as? [String: Any] {
+            for (p, raw) in providersExpect {
+                guard let ep = raw as? [String: Any] else { continue }
+                guard let pb = agg.providers[p] else {
+                    XCTFail("providers.\(p) missing \(ctx)"); continue
+                }
+                if let v = ep["today"] as? Int { XCTAssertEqual(pb.today, v, "providers.\(p).today \(ctx)") }
+                if let v = ep["total"] as? Int { XCTAssertEqual(pb.total, v, "providers.\(p).total \(ctx)") }
+                if let v = ep["thisWeek"] as? Int { XCTAssertEqual(pb.thisWeek, v, "providers.\(p).thisWeek \(ctx)") }
+                if let v = ep["rolling5h"] as? Int { XCTAssertEqual(pb.rolling5h, v, "providers.\(p).rolling5h \(ctx)") }
+
+                if let bc = ep["byClass"] as? [String: Any] {
+                    if let v = bc["input"] as? Int { XCTAssertEqual(pb.byClass.input, v, "providers.\(p).byClass.input \(ctx)") }
+                    if let v = bc["cacheCreate"] as? Int { XCTAssertEqual(pb.byClass.cacheCreate, v, "providers.\(p).byClass.cacheCreate \(ctx)") }
+                    if let v = bc["cacheRead"] as? Int { XCTAssertEqual(pb.byClass.cacheRead, v, "providers.\(p).byClass.cacheRead \(ctx)") }
+                    if let v = bc["output"] as? Int { XCTAssertEqual(pb.byClass.output, v, "providers.\(p).byClass.output \(ctx)") }
+                }
+
+                if let bm = ep["byModel"] as? [String: Any] {
+                    var expected: [String: Int] = [:]
+                    for (k, v) in bm { if let vi = v as? Int { expected[k] = vi } }
+                    XCTAssertEqual(pb.byModel, expected, "providers.\(p).byModel \(ctx)")
+                }
+
+                if let bs = ep["bySurface"] as? [String: Any] {
+                    for (k, raw2) in bs {
+                        guard let v = raw2 as? Int, let surface = Surface(rawValue: k) else {
+                            XCTFail("bad providers.\(p).bySurface entry \(k) \(ctx)"); continue
+                        }
+                        XCTAssertEqual(pb.bySurface[surface] ?? 0, v, "providers.\(p).bySurface.\(k) \(ctx)")
+                    }
+                }
+
+                if let windowsExpect = ep["windows"] as? [String: Any] {
+                    for (wk, wraw) in windowsExpect {
+                        guard let ew = wraw as? [String: Any] else { continue }
+                        guard let w = pb.windows[wk] else {
+                            XCTFail("providers.\(p).windows.\(wk) missing \(ctx)"); continue
+                        }
+                        if let v = ew["source"] as? String { XCTAssertEqual(w.source, v, "providers.\(p).windows.\(wk).source \(ctx)") }
+                        if let v = ew["period"] as? String { XCTAssertEqual(w.period, v, "providers.\(p).windows.\(wk).period \(ctx)") }
+                        if let v = ew["usedPct"] as? Double { XCTAssertEqual(w.usedPct ?? .nan, v, accuracy: 1e-9, "providers.\(p).windows.\(wk).usedPct \(ctx)") }
+                        if let v = ew["windowMinutes"] as? Int { XCTAssertEqual(w.windowMinutes, v, "providers.\(p).windows.\(wk).windowMinutes \(ctx)") }
+                        if ew.keys.contains("cap") {
+                            let expectedCap: Int? = (ew["cap"] is NSNull) ? nil : (ew["cap"] as? Int)
+                            XCTAssertEqual(w.cap, expectedCap, "providers.\(p).windows.\(wk).cap \(ctx)")
+                        }
+                        if ew.keys.contains("calibratedCap") {
+                            let expectedCal: Int? = (ew["calibratedCap"] is NSNull) ? nil : (ew["calibratedCap"] as? Int)
+                            XCTAssertEqual(w.calibratedCap, expectedCal, "providers.\(p).windows.\(wk).calibratedCap \(ctx)")
+                        }
+                        if let v = ew["resetAtMs"] as? Int {
+                            let actualMs = w.resetAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }
+                            XCTAssertEqual(actualMs, v, "providers.\(p).windows.\(wk).resetAtMs \(ctx)")
+                        }
+                    }
+                }
+
+                if let planExpect = ep["plan"] as? [String: Any] {
+                    guard let plan = pb.plan else {
+                        XCTFail("providers.\(p).plan missing \(ctx)"); continue
+                    }
+                    if let v = planExpect["planType"] as? String { XCTAssertEqual(plan.planType, v, "providers.\(p).plan.planType \(ctx)") }
+                    if let v = planExpect["asOfMs"] as? Int {
+                        let actualMs = plan.asOf.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }
+                        XCTAssertEqual(actualMs, v, "providers.\(p).plan.asOfMs \(ctx)")
                     }
                 }
             }

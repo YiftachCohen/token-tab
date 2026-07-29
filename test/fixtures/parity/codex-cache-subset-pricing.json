@@ -1,0 +1,37 @@
+{
+  "name": "Codex cache multipliers -> cacheCreate always priced at 0 (no write billing), cacheRead at 0.10x input",
+  "_comment": "Pins the Codex-specific cache multiplier row from the design doc (section 3): codex {write: 0, read: 0.10} vs claude {write: 1.25, read: 0.10}. Uses gpt-5.4 (input $2.50/M, output $15.00/M). cache_creation_input_tokens is nonzero here on purpose -- ingestion always emits 0 for Codex records (design doc section 2), but the PRICING layer must still treat a nonzero cache-write class as worth $0, not fall back to the input rate. future-dated so today/thisWeek/rolling5h stay 0 (TZ-independent, same trick as the other provider fixtures).",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "codex:sess-cache", "requestId": "token:0", "model": "gpt-5.4", "provider": "codex",
+      "usage": { "input_tokens": 100000, "cache_creation_input_tokens": 50000, "cache_read_input_tokens": 200000, "output_tokens": 10000 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 360000,
+    "today": 0,
+    "thisWeek": 0,
+    "rolling5h": 0,
+    "byClass": { "input": 100000, "cacheCreate": 50000, "cacheRead": 200000, "output": 10000 },
+    "bySurface": { "codex": 360000 },
+    "byModel": { "gpt-5.4": 360000 },
+    "cost": {
+      "total": 0.45,
+      "today": 0,
+      "byModel": { "gpt-5.4": 0.45 },
+      "unpricedTokens": 0
+    },
+    "providerOrder": ["codex"],
+    "providers": {
+      "codex": {
+        "today": 0, "total": 360000, "thisWeek": 0, "rolling5h": 0,
+        "byClass": { "input": 100000, "cacheCreate": 50000, "cacheRead": 200000, "output": 10000 },
+        "byModel": { "gpt-5.4": 360000 },
+        "bySurface": { "codex": 360000 }
+      }
+    }
+  }
+}

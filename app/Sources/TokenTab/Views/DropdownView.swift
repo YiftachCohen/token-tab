@@ -70,7 +70,7 @@ struct DropdownView: View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             VStack(spacing: 0) {
                 if showSettings {
-                    SettingsView(store: store, now: ctx.date) { showSettings = false }
+                    SettingsView(store: store, access: access, now: ctx.date) { showSettings = false }
                 } else {
                     // Shared header + tabs; only the body below the switcher swaps.
                     PanelHeader(pill: headerPill(now: ctx.date))
@@ -83,38 +83,77 @@ struct DropdownView: View {
         }
     }
 
-    /// The active tab's body — the mode-specific Overview panel, or the History chart.
+    /// The active tab's body — the focused provider's Overview panel (Claude runway/burn or the
+    /// Codex official gauge), the OTHER provider as a compact secondary hairline row below it
+    /// (hidden at zero usage; tapping it swaps focus), or the History chart.
     @ViewBuilder private func tabBody(now: Date) -> some View {
         switch tab {
         case .overview:
-            switch store.snapshot.mode {
-            case .subscription: SubscriptionPanel(store: store, now: now)
-            case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric, now: now)
+            let focused = store.focused(now: now)
+            VStack(spacing: 0) {
+                switch focused {
+                case .codex:
+                    CodexPanel(store: store, now: now)
+                case .claude:
+                    switch store.snapshot.mode {
+                    case .subscription: SubscriptionPanel(store: store, now: now)
+                    case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric, now: now)
+                    }
+                }
+                secondaryRow(focused: focused, now: now)
             }
         case .history:
-            HistoryPanel(snapshot: store.snapshot, mode: store.snapshot.mode)
+            HistoryPanel(snapshot: store.snapshot, focused: store.focused(now: now), mode: store.snapshot.mode)
         }
     }
 
-    /// The header badge, hoisted out of the panels so it's shared across tabs: a pulsing LIVE
-    /// dot + CLAUDE MAX on a subscription (the dot means "this % is authoritative"), or the
-    /// BEDROCK/API pill on pay-per-token.
-    @ViewBuilder private func headerPill(now: Date) -> some View {
-        switch store.snapshot.mode {
-        case .subscription:
-            HStack(spacing: 7) {
-                if store.snapshot.quotaLeft(now: now)?.source == "live" {
-                    HStack(spacing: 4) {
-                        GlowDot(color: Theme.green, size: 5, glow: 3)
-                        Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)
-                            .foregroundStyle(Theme.green)
-                    }
-                }
-                Pill(text: "CLAUDE MAX", tint: Theme.green)
+    /// The OTHER provider's compact row, shown only when it has usage. Codex is the "other"
+    /// when Claude is focused (and vice versa). Tapping sets an explicit focus in the store.
+    @ViewBuilder private func secondaryRow(focused: Provider, now: Date) -> some View {
+        let other: Provider = focused == .claude ? .codex : .claude
+        let show = other == .codex ? store.snapshot.codexHasUsage
+                                   : (store.snapshot.agg.providers["claude"]?.total ?? store.snapshot.agg.total) > 0
+        if show {
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 4)
+            SecondaryProviderRow(provider: other, snapshot: store.snapshot, now: now) {
+                withAnimation(.easeOut(duration: 0.15)) { store.userFocus = other }
             }
-        case .burn:
-            Pill(text: store.snapshot.surface == .bedrock ? "BEDROCK" : "API", tint: Theme.amber)
+            .padding(.horizontal, 5)
         }
+    }
+
+    /// The header badge, hoisted out of the panels so it's shared across tabs. When Codex is
+    /// the focused provider it gets its own indigo pill (with the plan, e.g. CODEX · PLUS);
+    /// otherwise it's the Claude pill: a pulsing LIVE dot + CLAUDE MAX on a subscription (the
+    /// dot means "this % is authoritative"), or the BEDROCK/API pill on pay-per-token.
+    @ViewBuilder private func headerPill(now: Date) -> some View {
+        if store.focused(now: now) == .codex {
+            Pill(text: codexPillText, tint: Theme.indigo)
+        } else {
+            switch store.snapshot.mode {
+            case .subscription:
+                HStack(spacing: 7) {
+                    if store.snapshot.quotaLeft(now: now)?.source == "live" {
+                        HStack(spacing: 4) {
+                            GlowDot(color: Theme.green, size: 5, glow: 3)
+                            Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)
+                                .foregroundStyle(Theme.green)
+                        }
+                    }
+                    Pill(text: "CLAUDE MAX", tint: Theme.green)
+                }
+            case .burn:
+                Pill(text: store.snapshot.surface == .bedrock ? "BEDROCK" : "API", tint: Theme.amber)
+            }
+        }
+    }
+
+    /// "CODEX" or "CODEX · PLUS" — the plan is formatting-only metadata from the snapshot.
+    private var codexPillText: String {
+        if let plan = store.snapshot.codexPlan, !plan.isEmpty {
+            return "CODEX · \(plan.uppercased())"
+        }
+        return "CODEX"
     }
 
     /// Shared footer: the mode/tab-specific trust line on the left, actions on the right (one
@@ -150,9 +189,17 @@ struct DropdownView: View {
         }
     }
 
-    /// The mode/tab-specific trust line: subscription is local-only, Bedrock/API states the
-    /// price-table read, History is computed on-device.
+    /// Whether the Codex directory is actually being read (enabled AND present on disk) — the
+    /// gate for the "+ ~/.codex" clause in the trust footer.
+    private var codexActive: Bool { store.codexEnabled && store.codexDirExists }
+
+    /// The mode/tab-specific trust line. When Codex is active, every state names both dirs
+    /// being read ("… reads ~/.claude + ~/.codex"); otherwise the existing wording stands.
     private var trustText: String {
+        if codexActive {
+            if tab == .history { return "Computed on-device · reads ~/.claude + ~/.codex" }
+            return "0 network calls · reads ~/.claude + ~/.codex"
+        }
         if tab == .history { return "Computed on-device · 0 network calls" }
         return store.snapshot.mode == .burn
             ? "0 network calls · reads ~/.claude"

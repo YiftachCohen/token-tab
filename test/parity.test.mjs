@@ -30,6 +30,7 @@ for (const file of files) {
       now: fx.now,
       cap: fx.cap || undefined, // 0 means "no cap" -> let aggregate default
       cost: costOfUsage, // always injected, so every fixture exercises pricing too
+      codexRateLimits: fx.codexRateLimits || undefined,
     });
     const e = fx.expect;
 
@@ -62,6 +63,55 @@ for (const file of files) {
       // JS exposes resetAt already as epoch ms (or null when idle).
       if ("resetMs" in w) assert.equal(a.window.resetAt, w.resetMs, "window.resetMs");
       if ("pct" in w) assert.equal(a.window.pct, w.pct, "window.pct");
+    }
+
+    if (e.providerOrder) assert.deepEqual(a.providerOrder, e.providerOrder, "providerOrder");
+
+    if (e.providers) {
+      for (const p of Object.keys(e.providers)) {
+        const pb = a.providers[p];
+        assert.ok(pb, `providers.${p} present`);
+        const ep = e.providers[p];
+        for (const k of ["today", "total", "thisWeek", "rolling5h"]) {
+          if (k in ep) assert.equal(pb[k], ep[k], `providers.${p}.${k}`);
+        }
+        if (ep.byClass) {
+          for (const k of Object.keys(ep.byClass)) {
+            assert.equal(pb.byClass[k], ep.byClass[k], `providers.${p}.byClass.${k}`);
+          }
+        }
+        if (ep.byModel) assert.deepEqual(pb.byModel, ep.byModel, `providers.${p}.byModel`);
+        if (ep.bySurface) {
+          for (const k of Object.keys(ep.bySurface)) {
+            assert.equal(pb.bySurface[k] ?? 0, ep.bySurface[k], `providers.${p}.bySurface.${k}`);
+          }
+        }
+        if (ep.windows) {
+          for (const wk of Object.keys(ep.windows)) {
+            const w = pb.windows?.[wk];
+            const ew = ep.windows[wk];
+            assert.ok(w, `providers.${p}.windows.${wk} present`);
+            if ("source" in ew) assert.equal(w.source, ew.source, `providers.${p}.windows.${wk}.source`);
+            if ("period" in ew) assert.equal(w.period, ew.period, `providers.${p}.windows.${wk}.period`);
+            if ("usedPct" in ew) assert.equal(w.usedPct, ew.usedPct, `providers.${p}.windows.${wk}.usedPct`);
+            if ("windowMinutes" in ew) assert.equal(w.windowMinutes, ew.windowMinutes, `providers.${p}.windows.${wk}.windowMinutes`);
+            if ("cap" in ew) assert.equal(w.cap, ew.cap, `providers.${p}.windows.${wk}.cap`);
+            if ("calibratedCap" in ew) assert.equal(w.calibratedCap, ew.calibratedCap, `providers.${p}.windows.${wk}.calibratedCap`);
+            if ("resetAtMs" in ew) {
+              const actualMs = w.resetAt == null ? null : new Date(w.resetAt).getTime();
+              assert.equal(actualMs, ew.resetAtMs, `providers.${p}.windows.${wk}.resetAtMs`);
+            }
+          }
+        }
+        if (ep.plan) {
+          assert.ok(pb.plan, `providers.${p}.plan present`);
+          if ("planType" in ep.plan) assert.equal(pb.plan.planType, ep.plan.planType, `providers.${p}.plan.planType`);
+          if ("asOfMs" in ep.plan) {
+            const actualMs = pb.plan.asOf == null ? null : new Date(pb.plan.asOf).getTime();
+            assert.equal(actualMs, ep.plan.asOfMs, `providers.${p}.plan.asOfMs`);
+          }
+        }
+      }
     }
 
     if (e.cost) {

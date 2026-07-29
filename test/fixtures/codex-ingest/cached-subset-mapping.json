@@ -1,0 +1,16 @@
+{
+  "desc": "Cached-subset arithmetic: cached ⊂ input. input mapping = max(0, dInput - dCached). Edge: all-cached call (dInput == dCached) -> plain input = 0. Also verifies clamp when cached delta exceeds input delta.",
+  "fileName": "rollout-2026-06-20T17-00-00-019ee600-0000-7000-8000-000000000001.jsonl",
+  "lines": [
+    { "type": "session_meta", "timestamp": "2026-06-20T17:00:00.000Z", "payload": { "id": "019ee600-0000-7000-8000-000000000001" } },
+    { "type": "turn_context", "payload": { "model": "gpt-5.4" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T17:01:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 1000, "cached_input_tokens": 1000, "output_tokens": 10, "total_tokens": 1010 } }, "rate_limits": null } },
+    { "type": "event_msg", "timestamp": "2026-06-20T17:02:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 1100, "cached_input_tokens": 1300, "output_tokens": 25, "total_tokens": 1125 } }, "rate_limits": null } }
+  ],
+  "expected": [
+    { "messageId": "codex:019ee600-0000-7000-8000-000000000001", "requestId": "token:0", "model": "gpt-5.4", "usage": { "input_tokens": 0, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0, "output_tokens": 10 }, "timestamp": "2026-06-20T17:01:00.000Z", "provider": "codex", "isSidechain": false },
+    { "messageId": "codex:019ee600-0000-7000-8000-000000000001", "requestId": "token:1", "model": "gpt-5.4", "usage": { "input_tokens": 0, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 0, "output_tokens": 15 }, "timestamp": "2026-06-20T17:02:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 0,
+  "rateLimits": null
+}

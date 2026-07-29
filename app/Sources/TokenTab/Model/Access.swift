@@ -26,6 +26,18 @@ final class AccessManager: ObservableObject {
     private let defaultsKey = "claudeFolderBookmark"
     private var scopedURL: URL?
 
+    // Codex (~/.codex) read access is the exact same mechanism as Claude's: a user-granted,
+    // read-only security-scoped bookmark — NOT a broadened entitlement (the app stays
+    // files.user-selected.read-only only, so no home-folder access). The launch path below
+    // re-acquires a previously granted scope; the grant UI itself is a later phase, and
+    // unsandboxed `swift run` reads ~/.codex directly with no scope needed.
+    private let codexDefaultsKey = "codexFolderBookmark"
+    private var codexScopedURL: URL?
+
+    /// Published so the Settings grant row can reflect "granted" vs "grant needed" live. True
+    /// once a ~/.codex scope is held (a saved bookmark resolved on launch, or a fresh grant).
+    @Published private(set) var codexGranted = false
+
     /// The directory we should read, if any.
     var logDir: URL? {
         switch state {
@@ -35,6 +47,10 @@ final class AccessManager: ObservableObject {
     }
 
     func bootstrap() {
+        // Re-acquire a previously granted ~/.codex scope for the app's lifetime (held until exit,
+        // like the Claude scope). No-op when none was ever granted — the Codex reader then finds no
+        // files under the sandbox and is silently skipped, exactly the intended fail-soft.
+        resolveCodexBookmark()
         let target = LogReader.defaultLogDir()
         // 1) Try a saved bookmark (the sandboxed happy path).
         if let url = resolveSavedBookmark() {
@@ -72,6 +88,53 @@ final class AccessManager: ObservableObject {
         guard url.startAccessingSecurityScopedResource() else { return nil }
         scopedURL = url
         return url
+    }
+
+    /// Resolve the saved ~/.codex bookmark (if any) and hold its scope for the app's lifetime.
+    /// Mirrors resolveSavedBookmark; a stale bookmark is dropped (the phase-6 grant UI re-prompts).
+    @discardableResult
+    private func resolveCodexBookmark() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: codexDefaultsKey) else { return nil }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data,
+                                 options: [.withSecurityScope],
+                                 relativeTo: nil,
+                                 bookmarkDataIsStale: &stale) else { return nil }
+        if stale { UserDefaults.standard.removeObject(forKey: codexDefaultsKey); return nil }
+        codexScopedURL?.stopAccessingSecurityScopedResource()
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        codexScopedURL = url
+        codexGranted = true
+        return url
+    }
+
+    /// Open the folder picker for ~/.codex — the exact same read-only, security-scoped grant
+    /// as Claude's, stored under `codexFolderBookmark`. Not a widened entitlement: the app
+    /// stays `files.user-selected.read-only`, so this adds one folder, not home-folder access.
+    /// Returns true when a scope was acquired, so the caller can kick a refresh.
+    @discardableResult
+    func requestCodexAccess() -> Bool {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true      // ~/.codex is a dotfile, hidden by default
+        panel.prompt = "Grant read access"
+        panel.message = "Token Tab reads token counts from ~/.codex. Select the .codex folder."
+        let codex = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+        panel.directoryURL = FileManager.default.fileExists(atPath: codex.path) ? codex : FileManager.default.homeDirectoryForCurrentUser
+
+        guard panel.runModal() == .OK, let chosen = panel.url else { return false }
+        codexScopedURL?.stopAccessingSecurityScopedResource()
+        if let data = try? chosen.bookmarkData(options: [.withSecurityScope],
+                                               includingResourceValuesForKeys: nil,
+                                               relativeTo: nil) {
+            UserDefaults.standard.set(data, forKey: codexDefaultsKey)
+        }
+        guard chosen.startAccessingSecurityScopedResource() else { return false }
+        codexScopedURL = chosen
+        codexGranted = true
+        return true
     }
 
     /// Open the folder picker, pre-pointed at ~/.claude with hidden files shown

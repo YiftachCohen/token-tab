@@ -11,7 +11,8 @@
 [![CI](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml/badge.svg)](https://github.com/YiftachCohen/token-tab/actions/workflows/ci.yml)
 
 Token Tab shows your Claude Code token usage in the macOS menu bar. It reads the logs
-Claude Code already writes to `~/.claude` — no API keys, no keychain, no network calls.
+Claude Code already writes to `~/.claude` — and, if you use OpenAI's Codex CLI, the
+session logs it writes to `~/.codex` — no API keys, no keychain, no network calls.
 It reads token counts off disk and shows them; nothing leaves your machine.
 
 Click the menu bar item for your current 5-hour usage window (with an exact reset
@@ -20,7 +21,10 @@ countdown) and a local cost estimate.
 ## What it reads
 
 - `~/.claude/projects/**/*.jsonl` — the transcripts Claude Code already writes.
-- Tokens per model, per surface (subscription / Bedrock), per window (today / this week / last 5h).
+- `~/.codex/sessions/**/*.jsonl` (and `archived_sessions/`) — Codex CLI rollout logs,
+  when present. Only the `token_count` usage numbers, official rate-limit percentages,
+  model ids, and session ids are decoded; `response_item` content lines never are.
+- Tokens per model, per surface (subscription / Bedrock / Codex), per window (today / this week / last 5h).
 - A dollar **estimate** from a bundled per-model rate table — local arithmetic, not an invoice (see [Cost](#cost)).
 
 Works the same whether Claude Code talks to the Anthropic API, a Max/Pro subscription,
@@ -32,9 +36,11 @@ credentials are needed to read them.
 The point of Token Tab is that it has no way to leak anything. Each claim is verifiable:
 
 - **No network.** No network code, no dependencies.
-- **No content.** The parser decodes only the metadata it needs — `type`, `model`,
-  `message.id`, `requestId`, `usage`, `timestamp`, `isSidechain`. It never touches
-  `message.content` (your prompts, code, and responses).
+- **No content.** The parsers decode only the metadata they need — for Claude logs:
+  `type`, `model`, `message.id`, `requestId`, `usage`, `timestamp`, `isSidechain`;
+  for Codex logs: `token_count` usage totals, `rate_limits`, the `turn_context` model,
+  and the `session_meta` id. Neither ever touches message content (your prompts, code,
+  and responses).
 - **No state.** No cache, no telemetry, nothing written.
 
 What it can't claim is to be *blind* to your data. Any usage meter has to read the
@@ -52,8 +58,11 @@ grep -RnE "\.content" src/ | grep -v "//"                       # never reads co
 cat package.json | grep -A1 dependencies                        # -> {}
 ```
 
-The parser is `recordFromLine` in `src/core.mjs` — it returns `message.id`, `model`,
-`usage`, `timestamp`, `isSidechain`, never content. The one subprocess in the repo is
+The Claude parser is `recordFromLine` in `src/core.mjs` — it returns `message.id`,
+`model`, `usage`, `timestamp`, `isSidechain`, never content. The Codex parser is
+`recordsFromCodexLines` in `src/codex.mjs` — it checks each line's `type` first and
+destructures only whitelisted usage/rate-limit fields; `response_item` (content) lines
+are skipped by type before any payload is decoded. The one subprocess in the repo is
 the opt-in live reader, fenced outside `src/` in `adapters/` (see
 [Live server %](#live-server--opt-in)). The native app's own audit — sandbox
 entitlements, no-network greps over `app/Sources` — is in

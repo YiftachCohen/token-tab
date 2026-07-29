@@ -1,0 +1,16 @@
+{
+  "desc": "Mid-file reset (compaction): cumulative total drops 98614 -> 13344. Reader total must equal the sum of both segments (98614 + 13344), NOT the final 13344.",
+  "fileName": "rollout-2026-06-20T16-40-45-019ee57a-1a5a-78a0-a56b-db3ae771f41f.jsonl",
+  "lines": [
+    { "type": "session_meta", "timestamp": "2026-06-20T16:40:45.000Z", "payload": { "id": "019ee57a-1a5a-78a0-a56b-db3ae771f41f" } },
+    { "type": "turn_context", "payload": { "model": "gpt-5.5" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T16:41:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 80000, "cached_input_tokens": 50000, "output_tokens": 18614, "total_tokens": 98614 } }, "rate_limits": null } },
+    { "type": "event_msg", "timestamp": "2026-06-20T16:45:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 10000, "cached_input_tokens": 6000, "output_tokens": 3344, "total_tokens": 13344 } }, "rate_limits": null } }
+  ],
+  "expected": [
+    { "messageId": "codex:019ee57a-1a5a-78a0-a56b-db3ae771f41f", "requestId": "token:0", "model": "gpt-5.5", "usage": { "input_tokens": 30000, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 0, "output_tokens": 18614 }, "timestamp": "2026-06-20T16:41:00.000Z", "provider": "codex", "isSidechain": false },
+    { "messageId": "codex:019ee57a-1a5a-78a0-a56b-db3ae771f41f", "requestId": "token:1", "model": "gpt-5.5", "usage": { "input_tokens": 4000, "cache_read_input_tokens": 6000, "cache_creation_input_tokens": 0, "output_tokens": 3344 }, "timestamp": "2026-06-20T16:45:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 0,
+  "rateLimits": null
+}

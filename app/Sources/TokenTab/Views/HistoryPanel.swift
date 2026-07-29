@@ -13,28 +13,71 @@ import TokenTabCore
 
 enum HistMetric: Hashable { case cost, tokens }
 
+/// The History provider filter — All, or a single provider (design §6). Defaults to the
+/// currently focused provider so History opens on whatever the Overview was showing.
+enum HistScope: Hashable { case all, claude, codex }
+
 struct HistoryPanel: View {
     let snapshot: Snapshot
     @Environment(\.colorScheme) private var scheme
 
     @State private var range: Int
     @State private var metric: HistMetric
+    @State private var scope: HistScope
     @State private var chartProgress: Double = 0   // open-beat: bars grow on appear
     /// Kept so the chart can carry color-as-mode: green bars on a subscription, amber on
     /// pay-per-token (a cost chart drawn in green would cross-wire the green=health semantic).
     private let mode: Mode
+    /// Whether Codex has any usage — gates the Codex segment (no dead filter when empty).
+    private let codexPresent: Bool
 
-    /// Default the metric to the mode's headline: tokens on a subscription, $ on pay-per-token.
-    init(snapshot: Snapshot, mode: Mode) {
+    /// Default the metric to the mode's headline (tokens on a subscription, $ on pay-per-token)
+    /// and the scope to the focused provider (so History mirrors the Overview it opened from).
+    init(snapshot: Snapshot, focused: Provider, mode: Mode) {
         self.snapshot = snapshot
         self.mode = mode
+        self.codexPresent = snapshot.codexHasUsage
         _range = State(initialValue: 14)
-        _metric = State(initialValue: mode == .subscription ? .tokens : .cost)
+        // Codex has no cost dimension worth defaulting to (many models unpriced) → tokens.
+        _metric = State(initialValue: (mode == .subscription || focused == .codex) ? .tokens : .cost)
+        _scope = State(initialValue: focused == .codex ? .codex : .all)
     }
 
     // MARK: derived series
 
-    private var daily: [DayUsage] { snapshot.history }
+    /// Is this a Codex model id? (gpt-*/codex-* — the pragmatic per-provider filter, since
+    /// the daily series carries model ids, not a provider tag; see design §6.)
+    private static func isCodexModel(_ base: String) -> Bool {
+        let id = base.lowercased()
+        return id.contains("codex") || id.hasPrefix("gpt")
+    }
+
+    /// The daily series, filtered to the active scope by model id. `.all` is the untouched
+    /// combined series; a single-provider scope re-buckets each day to that provider's models.
+    private var daily: [DayUsage] {
+        let base = snapshot.history
+        switch scope {
+        case .all: return base
+        case .claude: return base.map { filtered($0) { !Self.isCodexModel($0) } }
+        case .codex:  return base.map { filtered($0) {  Self.isCodexModel($0) } }
+        }
+    }
+
+    /// Re-derive one day's totals from its per-model maps, keeping only models that pass `keep`.
+    private func filtered(_ d: DayUsage, keep: (String) -> Bool) -> DayUsage {
+        let tok = d.tokensByModel.filter { keep($0.key) }
+        let cost = d.costByModel.filter { keep($0.key) }
+        return DayUsage(date: d.date,
+                        tokens: tok.values.reduce(0, +),
+                        cost: cost.values.reduce(0, +),
+                        weekend: d.weekend,
+                        tokensByModel: tok,
+                        costByModel: cost)
+    }
+    private var scopeOptions: [(label: String, value: HistScope)] {
+        [("All", .all), ("Claude", .claude), ("Codex", .codex)]
+    }
+
     private var isTok: Bool { metric == .tokens }
     private func value(_ d: DayUsage) -> Double { isTok ? Double(d.tokens) : d.cost }
 
@@ -78,6 +121,12 @@ struct HistoryPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // All | Claude | Codex provider filter (design §6). Codex segment only when present.
+            if codexPresent {
+                MiniSegmented(options: scopeOptions, selection: $scope, hPadding: 12)
+                    .padding(.horizontal, 17).padding(.top, 12)
+            }
+
             // $ / Tok (left) · 7d / 14d / 30d (right)
             HStack {
                 MiniSegmented(options: [("$", .cost), ("Tok", .tokens)],
@@ -105,14 +154,17 @@ struct HistoryPanel: View {
             // Daily bars + axis
             VStack(spacing: 6) {
                 if maxValue > 0 {
-                    // Color carries the mode. Subscription: green bars, amber "today" (pops by
-                    // hue). Bedrock/API (cost): an all-amber chart — a calmer amber body with the
-                    // brightest amber for today — so the $ chart stays true to amber=cost.
+                    // Color carries the mode/scope. Codex scope: indigo bars (DESIGN.md: indigo
+                    // = Codex). Subscription: green bars, amber "today". Bedrock/API (cost): an
+                    // all-amber chart so the $ chart stays true to amber=cost.
+                    let codexScope = scope == .codex
                     let burn = mode != .subscription
                     HistoryChart(bars: bars, maxValue: maxValue, avg: avg,
-                                 bar: burn ? solid(0xC2740F, 0xF5B44D).opacity(0.5)
+                                 bar: codexScope ? solid(0x5B62D6, 0x7C83F0).opacity(0.5)
+                                     : burn ? solid(0xC2740F, 0xF5B44D).opacity(0.5)
                                            : solid(0x2E9E63, 0x36C98A),
-                                 today: burn ? solid(0xC2740F, 0xF5B44D)
+                                 today: codexScope ? solid(0x5B62D6, 0x7C83F0)
+                                      : burn ? solid(0xC2740F, 0xF5B44D)
                                              : solid(0xC08A3E, 0xD6A45A),
                                  avgLine: solid(0x76736D, 0x9AA1B1).opacity(0.55),
                                  progress: chartProgress)

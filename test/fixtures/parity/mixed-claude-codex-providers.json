@@ -1,0 +1,59 @@
+{
+  "name": "mixed claude + codex records -> combined totals + nested providers.* subtotals + codex surface",
+  "_comment": "future-dated so today/thisWeek/rolling5h/window are all 0/idle (TZ-independent, same trick as keep-last-and-surfaces.json). Codex records carry provider:'codex' and a gpt-5 model id with no pricing entry yet (Phase 1 has no Codex pricing), so they land fully in cost.unpriced -- proving the combined cost total stays Claude-only while combined tokens include both providers.",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "c1", "requestId": "cr1", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 50 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "c2", "requestId": "cr2", "model": "claude-sonnet-5",
+      "usage": { "input_tokens": 200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 20 },
+      "timestamp": "2026-06-20T12:05:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-1", "requestId": "token:0", "model": "gpt-5.2-codex", "provider": "codex",
+      "usage": { "input_tokens": 300, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 40, "output_tokens": 60 },
+      "timestamp": "2026-06-20T12:10:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-1", "requestId": "token:1", "model": "gpt-5.2-codex", "provider": "codex",
+      "usage": { "input_tokens": 150, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 30 },
+      "timestamp": "2026-06-20T12:15:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 950,
+    "today": 0,
+    "thisWeek": 0,
+    "rolling5h": 0,
+    "byClass": { "input": 750, "cacheCreate": 0, "cacheRead": 40, "output": 160 },
+    "bySurface": { "subscription": 370, "codex": 580 },
+    "byModel": { "claude-opus-4-8": 150, "claude-sonnet-5": 220, "gpt-5.2-codex": 580 },
+    "window": { "active": false, "tokens": 0, "calibratedCap": 0, "resetMs": null, "pct": null },
+    "cost": {
+      "total": 0.00265,
+      "today": 0,
+      "byModel": { "claude-opus-4-8": 0.00175, "claude-sonnet-5": 0.0009 },
+      "unpricedTokens": 580
+    },
+    "providerOrder": ["claude", "codex"],
+    "providers": {
+      "claude": {
+        "today": 0, "total": 370, "thisWeek": 0, "rolling5h": 0,
+        "byClass": { "input": 300, "cacheCreate": 0, "cacheRead": 0, "output": 70 },
+        "byModel": { "claude-opus-4-8": 150, "claude-sonnet-5": 220 },
+        "bySurface": { "subscription": 370 }
+      },
+      "codex": {
+        "today": 0, "total": 580, "thisWeek": 0, "rolling5h": 0,
+        "byClass": { "input": 450, "cacheCreate": 0, "cacheRead": 40, "output": 90 },
+        "byModel": { "gpt-5.2-codex": 580 },
+        "bySurface": { "codex": 580 }
+      }
+    }
+  }
+}

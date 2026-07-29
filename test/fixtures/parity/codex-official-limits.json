@@ -1,0 +1,49 @@
+{
+  "name": "codexRateLimits snapshot -> providers.codex.windows/plan formatting (never summed)",
+  "_comment": "One Codex record establishes the codex provider bucket/token totals; the official rate-limits snapshot is passed out-of-band via opts.codexRateLimits and must be formatted verbatim into providers.codex.windows.primary/secondary + providers.codex.plan -- it must NOT change any token or cost total. future-dated so today/thisWeek/rolling5h stay 0 (TZ-independent). resets_at is numeric EPOCH SECONDS -- the shape real Codex logs emit (asOf stays ISO, the shape the reader stamps); a review found the JS engine silently nulled numeric resets_at while an ISO-string fixture kept parity green, so this fixture deliberately pins the production shape (primary = 2026-06-01T05:00:00Z, secondary = 2026-06-08T00:00:00Z).",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "codex:sess-9", "requestId": "token:0", "model": "gpt-5.2-codex", "provider": "codex",
+      "usage": { "input_tokens": 500, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 100 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    }
+  ],
+  "codexRateLimits": {
+    "primary": { "used_percent": 42.5, "resets_at": 1780290000, "window_minutes": 300 },
+    "secondary": { "used_percent": 7, "resets_at": 1780876800, "window_minutes": 10080 },
+    "plan_type": "plus",
+    "asOf": "2026-06-01T00:00:00Z"
+  },
+  "expect": {
+    "total": 600,
+    "today": 0,
+    "thisWeek": 0,
+    "rolling5h": 0,
+    "bySurface": { "codex": 600 },
+    "byModel": { "gpt-5.2-codex": 600 },
+    "cost": { "unpricedTokens": 600 },
+    "providerOrder": ["codex"],
+    "providers": {
+      "codex": {
+        "today": 0, "total": 600, "thisWeek": 0, "rolling5h": 0,
+        "byModel": { "gpt-5.2-codex": 600 },
+        "bySurface": { "codex": 600 },
+        "windows": {
+          "primary": {
+            "source": "official", "period": "5h",
+            "usedPct": 42.5, "resetAtMs": 1780290000000, "windowMinutes": 300,
+            "cap": null, "calibratedCap": null
+          },
+          "secondary": {
+            "source": "official", "period": "weekly",
+            "usedPct": 7, "resetAtMs": 1780876800000, "windowMinutes": 10080,
+            "cap": null, "calibratedCap": null
+          }
+        },
+        "plan": { "planType": "plus", "asOfMs": 1780272000000 }
+      }
+    }
+  }
+}

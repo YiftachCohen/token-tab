@@ -1,0 +1,16 @@
+{
+  "desc": "Per-class independent reset: output_tokens shrinks (reset) while input/cached keep growing. Reset detection is per class, NOT gated on total_tokens.",
+  "fileName": "rollout-2026-06-20T16-23-00-019ee569-dad7-78c2-ac6b-a8e523ef4dec.jsonl",
+  "lines": [
+    { "type": "session_meta", "timestamp": "2026-06-20T16:23:00.000Z", "payload": { "id": "019ee569-dad7-78c2-ac6b-a8e523ef4dec" } },
+    { "type": "turn_context", "payload": { "model": "gpt-5.4" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T16:24:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 1000, "cached_input_tokens": 400, "output_tokens": 900, "total_tokens": 1900 } }, "rate_limits": null } },
+    { "type": "event_msg", "timestamp": "2026-06-20T16:25:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 1500, "cached_input_tokens": 600, "output_tokens": 200, "total_tokens": 1700 } }, "rate_limits": null } }
+  ],
+  "expected": [
+    { "messageId": "codex:019ee569-dad7-78c2-ac6b-a8e523ef4dec", "requestId": "token:0", "model": "gpt-5.4", "usage": { "input_tokens": 600, "cache_read_input_tokens": 400, "cache_creation_input_tokens": 0, "output_tokens": 900 }, "timestamp": "2026-06-20T16:24:00.000Z", "provider": "codex", "isSidechain": false },
+    { "messageId": "codex:019ee569-dad7-78c2-ac6b-a8e523ef4dec", "requestId": "token:1", "model": "gpt-5.4", "usage": { "input_tokens": 300, "cache_read_input_tokens": 200, "cache_creation_input_tokens": 0, "output_tokens": 200 }, "timestamp": "2026-06-20T16:25:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 0,
+  "rateLimits": null
+}
