@@ -322,6 +322,10 @@ final class UsageStore: ObservableObject {
                 codexRateLimits = cx.codexRateLimits
             }
 
+            // Both providers counted; freeze to a `let` so the MainActor hop below captures a
+            // value rather than a still-mutable var (an error in the Swift 6 language mode).
+            let malformedTotal = malformed
+
             let agg = aggregate(records,
                                 options: AggregateOptions(now: now0, cap: cap, codexRateLimits: codexRateLimits),
                                 costModel: Pricing())
@@ -342,7 +346,7 @@ final class UsageStore: ObservableObject {
                 let mode: Mode = surface == .subscription ? .subscription : .burn
                 let health = Self.health(for: agg, live: live, now: now, mode: mode)
                 self.snapshot = Snapshot(agg: agg, mode: mode, surface: surface, health: health,
-                                         fileCount: files.count, malformed: malformed,
+                                         fileCount: files.count, malformed: malformedTotal,
                                          lastUpdated: now, cap: cap, live: live, history: history)
                 // Learn the cap from a fresh live reading (cap ≈ tokens / sessionPct) so a real
                 // % survives once live goes stale. Takes effect on the next refresh's cap.

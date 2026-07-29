@@ -6,8 +6,11 @@ Two artifacts ship per release, both from the same tag:
   notarized, stapled, universal (arm64 + x86_64). Built **locally** by
   `app/Scripts/package-app.sh` (add `--dmg` for a drag-to-Applications
   `Token-Tab-<version>.dmg` alongside it — Homebrew consumes the zip either way).
-- **`token-tab-<version>.tgz`** — the npm package (CLI + SwiftBar plugin + live
-  adapters). Built by `npm pack` / published with `npm publish`.
+- **`ycstudios-token-tab-<version>.tgz`** — the npm package
+  **`@ycstudios/token-tab`** (CLI + SwiftBar plugin + live adapters; the installed
+  command is still `token-tab`). Built by `npm pack` / published with `npm publish`.
+  Scoped because unscoped `token-tab` collides with the unrelated `tokentab` package
+  under npm's name-similarity rule.
 
 ## Why signing is local, not CI
 
@@ -71,33 +74,23 @@ that holds the key.
    npm publish
    ```
 
-## Homebrew (after the first published release)
+## Homebrew
 
-A cask needs a tap repo (`YiftachCohen/homebrew-tap`, file `Casks/token-tab.rb`).
-Template — update `version` and `sha256` (from the `.sha256` file) each release:
-
-```ruby
-cask "token-tab" do
-  version "0.1.0"
-  sha256 "<sha256 of Token-Tab-#{version}.zip>"
-
-  url "https://github.com/YiftachCohen/token-tab/releases/download/v#{version}/Token-Tab-#{version}.zip"
-  name "Token Tab"
-  desc "Provably-safe Claude Code usage meter for the menu bar"
-  homepage "https://github.com/YiftachCohen/token-tab"
-
-  depends_on macos: ">= :ventura"
-
-  app "Token Tab.app"
-end
-```
-
-Then users install with:
+The cask lives in [`YiftachCohen/homebrew-tap`](https://github.com/YiftachCohen/homebrew-tap)
+(`Casks/token-tab.rb`) and points at the release zip, pinned by sha256. Users install
+with:
 
 ```sh
-brew tap YiftachCohen/tap
+brew tap yiftachcohen/tap
 brew install --cask token-tab
 ```
+
+(Recent Homebrew asks users to trust a third-party tap on first install —
+`brew trust yiftachcohen/tap`.)
+
+**Each release**, as the final step after publishing: bump `version` and `sha256`
+(from the `.sha256` file) in `Casks/token-tab.rb` and push — `brew upgrade --cask
+token-tab` picks it up from there.
 
 ## No auto-update, by design
 

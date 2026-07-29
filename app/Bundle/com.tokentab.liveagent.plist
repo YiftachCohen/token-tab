@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Token Tab — the bundled live-% LaunchAgent, registered via SMAppService when the
+     user flips "Live %" on in the app (visible + revocable in System Settings ▸ Login
+     Items). launchd runs Contents/MacOS/TokenTabLiveHelper directly — NOT as a child of
+     the sandboxed app — so the helper can run `claude /usage` while the app itself keeps
+     its no-network sandbox. Label is distinct from the legacy script-installed agent
+     (com.tokentab.live, adapters/install-live.sh) so the two never collide. -->
+<dict>
+    <key>Label</key>
+    <string>com.tokentab.liveagent</string>
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/TokenTabLiveHelper</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.tokentab.TokenTab</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <!-- launchd gives agents a minimal PATH; include the usual claude install dirs
+         (the helper also probes known absolute locations itself). -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

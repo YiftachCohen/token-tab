@@ -42,24 +42,10 @@ enum Config {
 
     /// Parse one env-file's text into the honored KEY=VALUE pairs. Internal (not
     /// private) so tests can pin CRLF/quoting behavior without touching $HOME.
-    /// Mirrors the JS regex in token-tab.mjs loadLocalConfig(): tolerant of CRLF
-    /// (the JS `\s*$` eats the trailing \r), strips one layer of matching quotes.
+    /// The implementation lives in TokenTabCore (EnvFile.parse) so the bundled live
+    /// helper honors the exact same dotfile syntax without a second parser.
     static func parseEnvFile(_ text: String) -> [String: String] {
-        var values: [String: String] = [:]
-        // Split on any newline (\r, \n, \r\n) so a CRLF file yields clean lines with no
-        // trailing \r — otherwise Int("400000000\r") is nil and "bedrock\r" matches no case.
-        for line in text.split(whereSeparator: \.isNewline) {
-            let s = String(line)
-            guard let eq = s.firstIndex(of: "=") else { continue }
-            let key = s[..<eq].trimmingCharacters(in: .whitespaces)
-            guard key.hasPrefix("TOKENTAB_") || key == "CLAUDE_CODE_USE_BEDROCK" else { continue }
-            var val = s[s.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-            if (val.hasPrefix("\"") && val.hasSuffix("\"")) || (val.hasPrefix("'") && val.hasSuffix("'")) {
-                val = String(val.dropFirst().dropLast())
-            }
-            if values[key] == nil { values[key] = val }
-        }
-        return values
+        EnvFile.parse(text)
     }
 
     static func string(_ key: String) -> String? {

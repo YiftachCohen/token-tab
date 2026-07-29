@@ -52,9 +52,11 @@ final class AccessManager: ObservableObject {
         // files under the sandbox and is silently skipped, exactly the intended fail-soft.
         resolveCodexBookmark()
         let target = LogReader.defaultLogDir()
-        // 1) Try a saved bookmark (the sandboxed happy path).
+        // 1) Try a saved bookmark (the sandboxed happy path). Route it through the
+        //    same projects-dir resolution as a fresh grant, so a relaunch reads the
+        //    same directory the first run did.
         if let url = resolveSavedBookmark() {
-            state = .granted(url)
+            state = .granted(Self.resolveProjectsDir(under: url))
             return
         }
         // 2) Unsandboxed dev: if we can list the default dir directly, just use it.
@@ -84,6 +86,13 @@ final class AccessManager: ObservableObject {
                                  relativeTo: nil,
                                  bookmarkDataIsStale: &stale) else { return nil }
         if stale { UserDefaults.standard.removeObject(forKey: defaultsKey); return nil }
+        // Self-heal an over-broad grant saved by an earlier version (0.1.0 could
+        // capture the whole home folder — see requestAccess): drop it and re-prompt
+        // instead of walking folders this app should never touch.
+        if Self.isOverBroadGrant(url) {
+            UserDefaults.standard.removeObject(forKey: defaultsKey)
+            return nil
+        }
         releaseScope() // self-consistent: never stack a second scope on an existing one
         guard url.startAccessingSecurityScopedResource() else { return nil }
         scopedURL = url
@@ -147,10 +156,26 @@ final class AccessManager: ObservableObject {
         panel.showsHiddenFiles = true
         panel.prompt = "Grant read access"
         panel.message = "Token Tab reads token counts from ~/.claude. Select the .claude folder (or its projects subfolder)."
+        // Point the panel at ~/.claude UNCONDITIONALLY. The panel runs out-of-process
+        // (powerbox) and can browse where this sandboxed app cannot even stat — a
+        // fileExists() pre-check here is always false inside the sandbox, which would
+        // silently drop the picker at the home folder instead.
         let claude = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
-        panel.directoryURL = FileManager.default.fileExists(atPath: claude.path) ? claude : FileManager.default.homeDirectoryForCurrentUser
+        panel.directoryURL = claude
 
         guard panel.runModal() == .OK, let chosen = panel.url else { return }
+        // Refuse a grant of the home folder (or wider). One click on "Grant read
+        // access" while the panel sits at ~ would hand over everything — and walking
+        // it trips the OS consent prompts for Desktop / Documents / media library,
+        // the exact opposite of this app's promise.
+        if Self.isOverBroadGrant(chosen) {
+            let alert = NSAlert()
+            alert.messageText = "That folder is too broad"
+            alert.informativeText = "Token Tab only reads Claude Code's logs. Select the .claude folder itself (or its projects subfolder) — not your home folder."
+            alert.runModal()
+            requestAccess()
+            return
+        }
         releaseScope() // drop any previously held scope before acquiring the new one
         if let data = try? chosen.bookmarkData(options: [.withSecurityScope],
                                                includingResourceValuesForKeys: nil,
@@ -159,12 +184,25 @@ final class AccessManager: ObservableObject {
         }
         _ = chosen.startAccessingSecurityScopedResource()
         scopedURL = chosen
-        state = .granted(resolveProjectsDir(under: chosen))
+        state = .granted(Self.resolveProjectsDir(under: chosen))
+    }
+
+    /// True when a grant would cover the whole home folder or an ancestor of it
+    /// (`/`, `/Users`, …) — far more than this app should ever see, and enumerating
+    /// it triggers the OS's Desktop / Documents / media-library consent prompts.
+    nonisolated static func isOverBroadGrant(
+        _ url: URL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Bool {
+        let chosen = url.standardizedFileURL.resolvingSymlinksInPath().path
+        let homePath = home.standardizedFileURL.resolvingSymlinksInPath().path
+        if chosen == "/" || chosen == homePath { return true }
+        return (homePath + "/").hasPrefix(chosen + "/")
     }
 
     /// If the user picked `.claude` itself, descend to `projects` (where the logs live);
     /// if they picked `projects` directly, use it as-is.
-    private func resolveProjectsDir(under url: URL) -> URL {
+    nonisolated static func resolveProjectsDir(under url: URL) -> URL {
         if url.lastPathComponent == "projects" { return url }
         let projects = url.appendingPathComponent("projects")
         return FileManager.default.fileExists(atPath: projects.path) ? projects : url

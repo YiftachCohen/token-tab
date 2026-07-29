@@ -12,6 +12,7 @@ import TokenTabCore
 
 struct SubscriptionPanel: View {
     @ObservedObject var store: UsageStore
+    @ObservedObject var helper: LiveHelperManager
     let now: Date
 
     @State private var editingCap = false
@@ -59,6 +60,13 @@ struct SubscriptionPanel: View {
         guard let t = snapshot.live?.sessionResetText, !t.isEmpty else { return nil }
         if let r = t.range(of: " (") { return String(t[..<r.lowerBound]) }
         return t
+    }
+
+    private var staleLiveDetail: String {
+        guard let capturedAt = snapshot.live?.capturedAt else {
+            return "Live · stale — no successful reading yet"
+        }
+        return "Live · stale — last successful reading \(Fmt.duration(now.timeIntervalSince(capturedAt))) ago"
     }
 
     var body: some View {
@@ -264,12 +272,66 @@ struct SubscriptionPanel: View {
         }
     }
 
-    // MARK: live setup (unchanged)
+    // MARK: live setup — one click
 
-    /// The live-setup affordance, shown only when live is OFF or STALE (gated at the call site).
-    /// When it isn't fresh, honesty means handing over the exact command (the sandboxed app
-    /// can't run the sidecar), not hiding a button that could never work.
-    private var liveSetupRow: some View {
+    /// The live-setup affordance, shown only when live is OFF or STALE (gated at the call
+    /// site). One click registers the bundled helper (SMAppService → Login Items); the
+    /// copy-a-command fallback survives only where the toggle genuinely can't work (dev
+    /// builds with no agent plist in the bundle).
+    @ViewBuilder private var liveSetupRow: some View {
+        switch helper.status {
+        case .off:
+            liveActionRow(dot: Theme.faint,
+                          title: "Live %: off",
+                          detail: "One click — a bundled helper runs `claude /usage` every ~5 min. Shows in Login Items.",
+                          button: "Turn on") { helper.setEnabled(true) }
+        case .requiresApproval:
+            liveActionRow(dot: Theme.amber,
+                          title: "Live % — approval needed",
+                          detail: "macOS wants a nod first: allow Token Tab's helper under Login Items.",
+                          button: "Open Login Items") { helper.openLoginItems() }
+        case .on:
+            // Enabled but the cache isn't fresh: right after turning on (first reading is
+            // seconds away) or when readings stopped (claude signed out, machine asleep…).
+            HStack(spacing: 6) {
+                Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
+                Text(snapshot.live == nil ? "Live: on · waiting for the first reading…" : staleLiveDetail)
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 17)
+        case .unavailable:
+            manualSetupRow
+        }
+    }
+
+    /// One quiet row + one clear action, matching the panel's receipt density.
+    private func liveActionRow(dot: Color, title: String, detail: String,
+                               button: String, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Circle().strokeBorder(dot, lineWidth: 1).frame(width: 6, height: 6)
+                Text(title).font(.system(size: 10.5)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 8)
+                Button(action: action) {
+                    Text(button)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Theme.onAccent)
+                        .padding(.vertical, 3).padding(.horizontal, 9)
+                        .background(Theme.green, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            Text(detail)
+                .font(.system(size: 10)).foregroundStyle(Theme.faint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 17)
+    }
+
+    /// Dev-build fallback (no agent plist in the bundle): the original hand-over of the
+    /// exact command, because a toggle that can't work would be a lie.
+    private var manualSetupRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { withAnimation(.easeOut(duration: 0.15)) { showLiveHelp.toggle() } } label: {
                 HStack(spacing: 6) {
@@ -290,7 +352,7 @@ struct SubscriptionPanel: View {
 
     private var liveHelp: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("The live % comes from `claude /usage`. This app is sandboxed (no network), so a small helper fetches it. One-time setup — it installs a background agent that refreshes every ~5 min:")
+            Text("The live % comes from `claude /usage`. This dev build has no bundled helper, so schedule the script one:")
                 .font(.system(size: 10.5)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             commandChip(display: "adapters/install-live.sh", copy: installCopy, note: "auto-refresh")

@@ -160,10 +160,10 @@ struct HistoryPanel: View {
                     let codexScope = scope == .codex
                     let burn = mode != .subscription
                     HistoryChart(bars: bars, maxValue: maxValue, avg: avg,
-                                 bar: codexScope ? solid(0x5B62D6, 0x7C83F0).opacity(0.5)
+                                 bar: codexScope ? solid(Theme.indigoPair).opacity(0.5)
                                      : burn ? solid(0xC2740F, 0xF5B44D).opacity(0.5)
                                            : solid(0x2E9E63, 0x36C98A),
-                                 today: codexScope ? solid(0x5B62D6, 0x7C83F0)
+                                 today: codexScope ? solid(Theme.indigoPair)
                                       : burn ? solid(0xC2740F, 0xF5B44D)
                                              : solid(0xC08A3E, 0xD6A45A),
                                  avgLine: solid(0x76736D, 0x9AA1B1).opacity(0.55),
@@ -228,6 +228,11 @@ struct HistoryPanel: View {
     /// light/dark value here rather than rely on a dynamic color resolving inside the Canvas.
     private func solid(_ light: Int, _ dark: Int) -> Color {
         Color(hex8: scheme == .dark ? dark : light)
+    }
+
+    /// Same, for a Theme light/dark token pair — keeps the hex in Theme.swift (see DESIGN.md).
+    private func solid(_ pair: (light: Int, dark: Int)) -> Color {
+        solid(pair.light, pair.dark)
     }
 }
 

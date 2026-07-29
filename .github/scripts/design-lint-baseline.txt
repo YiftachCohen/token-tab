@@ -1,0 +1,13 @@
+app/Sources/TokenTab/FontLoader.swift:Font.custom(
+app/Sources/TokenTab/Views/DropdownView.swift:0x15161B
+app/Sources/TokenTab/Views/DropdownView.swift:0x26272E
+app/Sources/TokenTab/Views/DropdownView.swift:Color(hex
+app/Sources/TokenTab/Views/HistoryPanel.swift:0x2E9E63
+app/Sources/TokenTab/Views/HistoryPanel.swift:0x36C98A
+app/Sources/TokenTab/Views/HistoryPanel.swift:0x76736D
+app/Sources/TokenTab/Views/HistoryPanel.swift:0x9AA1B1
+app/Sources/TokenTab/Views/HistoryPanel.swift:0xC08A3E
+app/Sources/TokenTab/Views/HistoryPanel.swift:0xC2740F
+app/Sources/TokenTab/Views/HistoryPanel.swift:0xD6A45A
+app/Sources/TokenTab/Views/HistoryPanel.swift:0xF5B44D
+app/Sources/TokenTab/Views/HistoryPanel.swift:Color(hex

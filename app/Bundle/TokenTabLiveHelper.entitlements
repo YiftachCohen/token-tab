@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Token Tab — entitlements for the bundled live helper.
+     Since macOS 14.2, a sandboxed app may only register LaunchAgents whose executable
+     is ALSO sandboxed (SMAppService refuses otherwise — it would be a sandbox escape).
+     So the helper runs in its own sandbox, opened exactly as far as its one job needs:
+       - network.client: `claude /usage` talks to Anthropic's API (the whole point);
+       - ~/.claude read-write: claude's own config/credentials/state live there, and the
+         cache file this helper writes (<logDir>/.token-tab-live.json) does too;
+       - read-only paths: the usual claude/node install locations, so the helper can
+         exec the CLI (the child inherits this same sandbox).
+     Everything else stays sealed: no user files, no other folders, no keychain groups. -->
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+    <array>
+        <string>/.claude/</string>
+        <string>/.claude.json</string>
+        <string>/.config/token-tab/</string>
+        <string>/.token-tab.env</string>
+        <string>/Library/Logs/token-tab-live.log</string>
+    </array>
+    <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+    <array>
+        <string>/.local/bin/</string>
+        <string>/.local/share/claude/</string>
+        <string>/.bun/bin/</string>
+        <string>/.nvm/</string>
+        <string>/.config/token-tab/env</string>
+    </array>
+    <key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+    <array>
+        <string>/opt/homebrew/</string>
+        <string>/usr/local/</string>
+    </array>
+</dict>
+</plist>

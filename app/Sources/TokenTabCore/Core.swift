@@ -188,11 +188,12 @@ public struct LiveUsage: Sendable, Equatable {
         self.capturedAt = capturedAt
     }
 
-    /// Fresh enough to headline as "· live". `/usage` moves slowly, but a reading hours old
-    /// must not pose as live — past the TTL we fall back to the calibrated cap (itself
-    /// derived from live), so the gauge stays true without lying about freshness. A small
-    /// negative age is tolerated for clock skew between the sidecar and the app.
-    public func isFresh(now: Date, ttl: TimeInterval = 600) -> Bool {
+    /// Fresh enough to headline as "· live". The helper runs every five minutes, so allow
+    /// one minute of scheduling slack but mark a missed run stale before its next attempt.
+    /// Past the TTL we fall back to the calibrated cap (itself derived from live), so the
+    /// gauge stays true without lying about freshness. A small negative age is tolerated for
+    /// clock skew between the sidecar and the app.
+    public func isFresh(now: Date, ttl: TimeInterval = 360) -> Bool {
         guard let capturedAt else { return false }
         let age = now.timeIntervalSince(capturedAt)
         return age >= -60 && age <= ttl

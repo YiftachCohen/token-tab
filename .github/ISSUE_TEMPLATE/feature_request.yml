@@ -1,0 +1,27 @@
+name: Feature request
+description: An idea for Token Tab.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve
+      description: The situation where you wanted this, more than the mechanism.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Trust invariants
+      description: >-
+        Token Tab's core claim is that it can't leak anything — no network, no
+        runtime dependencies, no reads of message content, sandboxed app.
+        Features that require breaking one of these will be declined or
+        redesigned around the opt-in live fences (adapters/, app/Helper/).
+      options:
+        - label: This feature can work within the trust invariants (or I've explained why the fence needs to move).
+          required: true
