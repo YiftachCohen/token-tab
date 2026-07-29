@@ -9,8 +9,6 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
-## [0.2.0] — 2026-07-29
-
 ### Added
 - **Codex CLI usage, as a second provider.** Token Tab now also reads OpenAI Codex CLI
   rollout logs from `~/.codex/sessions` (and `archived_sessions/`), opt-in per provider
@@ -31,6 +29,10 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
   compete for the headline — Codex's official `used_percent`, Claude's only with a
   configured or live-calibrated cap — otherwise it falls back to combined today-tokens.
   A merged Claude+Codex percentage is deliberately never shown: it isn't a real number.
+
+## [0.2.0] — 2026-07-29
+
+### Added
 - **Claude Opus 5 (`claude-opus-5`) added to the rate table** at its list price of
   $5 / 1M input and $25 / 1M output — the same rate as Opus 4.8, so no existing cost
   changes. The bare `opus` alias now resolves to it (it's the family's current model),
