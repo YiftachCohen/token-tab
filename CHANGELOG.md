@@ -9,6 +9,8 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-29
+
 ### Added
 - **Codex CLI usage, as a second provider.** Token Tab now also reads OpenAI Codex CLI
   rollout logs from `~/.codex/sessions` (and `archived_sessions/`), opt-in per provider
