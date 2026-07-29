@@ -10,6 +10,25 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 ## [Unreleased]
 
 ### Added
+- **Codex CLI usage, as a second provider.** Token Tab now also reads OpenAI Codex CLI
+  rollout logs from `~/.codex/sessions` (and `archived_sessions/`), opt-in per provider
+  in Settings ▸ Providers. **Trust-surface change: a second directory is read.** The
+  sandboxed app asks for its own read-only grant of `~/.codex` — a separate scope, not a
+  widening of the `~/.claude` one — and the new parser
+  (`recordsFromCodexLines` in `src/codex.mjs`, mirrored by `CodexLogReader.swift`)
+  dispatches on each line's `type` and decodes only `token_count` usage totals,
+  `rate_limits`, the `turn_context` model, and the `session_meta` id; `response_item`
+  (content) lines are skipped by type before any payload is decoded. Still no network,
+  still nothing written. Cumulative token counts are diffed per session, with dedup for
+  resume/replay and per-class rate-limit resets. Five OpenAI models are priced
+  (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex`); anything else
+  stays honestly unpriced rather than costing $0.
+- **Two-gauge Overview and a max-pressure menu bar.** The provider under the most 5-hour
+  pressure headlines (Codex reads as `42% Cdx`); the other becomes a compact secondary
+  row that swaps focus on tap, and is hidden when it has no usage. Only real percentages
+  compete for the headline — Codex's official `used_percent`, Claude's only with a
+  configured or live-calibrated cap — otherwise it falls back to combined today-tokens.
+  A merged Claude+Codex percentage is deliberately never shown: it isn't a real number.
 - **Claude Opus 5 (`claude-opus-5`) added to the rate table** at its list price of
   $5 / 1M input and $25 / 1M output — the same rate as Opus 4.8, so no existing cost
   changes. The bare `opus` alias now resolves to it (it's the family's current model),
