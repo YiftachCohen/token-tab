@@ -10,6 +10,12 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 ## [Unreleased]
 
 ### Added
+- **Claude Opus 5 (`claude-opus-5`) added to the rate table** at its list price of
+  $5 / 1M input and $25 / 1M output — the same rate as Opus 4.8, so no existing cost
+  changes. The bare `opus` alias now resolves to it (it's the family's current model),
+  and `claude-opus-5[1m]` shares the base rate as usual. Trust-surface change: one new
+  priced model, mirrored in both engines; Opus 5 tokens were previously counted but
+  reported as unpriced.
 - **CI now checks value-level rate-table parity and design-token drift.** Two new
   scripts alongside the trust audit: `.github/scripts/rates-parity.mjs` (the JS and
   Swift price tables must carry identical numbers, aliases, and cache multipliers) and
