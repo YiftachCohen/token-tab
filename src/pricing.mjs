@@ -39,6 +39,7 @@ const CACHE_MULTIPLIERS = {
 const RATES = {
   // Current models.
   "claude-fable-5": { input: 10, output: 50 },
+  "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
   "claude-opus-4-6": { input: 5, output: 25 },
@@ -61,7 +62,7 @@ const RATES = {
 // Bare aliases Claude Code sometimes writes (e.g. "sonnet") resolve to the current
 // model in that family. This is the same family→latest mapping the official tooling uses.
 const ALIASES = {
-  opus: "claude-opus-4-8",
+  opus: "claude-opus-5",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 };

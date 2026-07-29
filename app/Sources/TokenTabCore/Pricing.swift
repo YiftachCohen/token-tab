@@ -32,6 +32,7 @@ public struct Pricing: CostModel {
     private static let rates: [String: Rate] = [
         // Current models.
         "claude-fable-5": Rate(input: 10, output: 50),
+        "claude-opus-5": Rate(input: 5, output: 25),
         "claude-opus-4-8": Rate(input: 5, output: 25),
         "claude-opus-4-7": Rate(input: 5, output: 25),
         "claude-opus-4-6": Rate(input: 5, output: 25),
@@ -51,7 +52,7 @@ public struct Pricing: CostModel {
     ]
 
     private static let aliases: [String: String] = [
-        "opus": "claude-opus-4-8",
+        "opus": "claude-opus-5",
         "sonnet": "claude-sonnet-5",
         "haiku": "claude-haiku-4-5",
     ]
