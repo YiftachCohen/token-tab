@@ -76,7 +76,7 @@ final class RatesCoverageTests: XCTestCase {
         let claudeTable = Pricing.ratedModelIds.union(Pricing.aliasIds)
         let codexTable = Pricing.openAIRatedModelIds
         let shouldBeUnpriced = [
-            "gpt-5.4-pro", "gpt-5.5-pro", "gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5-codex", "codex-auto-review",
+            "gpt-5.4-pro", "gpt-5.5-pro", "gpt-5.3-codex-spark", "gpt-5.4-codex", "codex-auto-review",
         ]
         for id in shouldBeUnpriced {
             XCTAssertFalse(claudeTable.contains(id), "\(id) must stay out of the Claude rate table")

@@ -147,7 +147,12 @@ export function aggregate(records, opts = {}) {
   let unpricedTokens = 0;
   let unpricedRequests = 0;
   const unpricedModels = new Set();
-  const stamps = []; // {t, sum} for the window pass (past-dated only)
+  // {t, sum} for the window pass (past-dated CLAUDE records only). The inferred 5h
+  // block is Anthropic's rate-limit window: feeding another provider's timestamps into
+  // it would inflate Claude's window tokens (and its cap %) with usage Anthropic never
+  // billed — a Codex-heavy trace could read as 100% of the Claude cap. See providers.*
+  // for each provider's own window (Codex's is official, never inferred).
+  const stamps = [];
 
   // Per-provider subtotals (providers.<p>.*) — only the fields the spec's schema
   // needs (today/total/thisWeek/rolling5h/byClass/byModel/bySurface). One bucket
@@ -165,6 +170,10 @@ export function aggregate(records, opts = {}) {
         byClass: { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 },
         byModel: {},
         bySurface: {},
+        // Dollars scoped to this provider (populated only when opts.cost is supplied).
+        // The combined cost.* block is every provider's spend added together; a UI that
+        // labels a figure "Claude" needs Claude's own, or a priced Codex record inflates it.
+        cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0 },
       };
       providerBuckets.set(p, b);
       providerOrder.push(p);
@@ -209,6 +218,7 @@ export function aggregate(records, opts = {}) {
       priced = !!c2.priced;
       if (priced) {
         costTotal += usd;
+        pb.cost.total += usd;
         costByModel[base] = (costByModel[base] || 0) + usd;
       } else {
         unpricedTokens += sum;
@@ -229,16 +239,17 @@ export function aggregate(records, opts = {}) {
         if (tms >= weekStart) { thisWeek += sum; pb.thisWeek += sum; }
         if (tms > rollingCutoff) { rolling5h += sum; pb.rolling5h += sum; }
         if (priced) {
-          if (isToday) costToday += usd;
-          if (tms >= weekStart) costWeek += usd;
-          if (tms > rollingCutoff) costRolling += usd;
+          if (isToday) { costToday += usd; pb.cost.today += usd; }
+          if (tms >= weekStart) { costWeek += usd; pb.cost.thisWeek += usd; }
+          if (tms > rollingCutoff) { costRolling += usd; pb.cost.rolling5h += usd; }
         }
-        stamps.push({ t: tms, sum });
+        if (provider === "claude") stamps.push({ t: tms, sum });
       }
     }
   }
 
-  // Pass 3 — current usage window (Anthropic-style fixed 5h reset blocks).
+  // Pass 3 — Claude's current usage window (Anthropic-style fixed 5h reset blocks), built
+  // from CLAUDE records only (see `stamps` above — other providers have their own windows).
   // A block starts at the EXACT first message (verified: Claude anchors the window to
   // your first message, not the top of the hour) and lasts blockHours; a gap >
   // blockHours, or crossing the block end, starts a new block. The reset time is exact.
@@ -277,12 +288,10 @@ export function aggregate(records, opts = {}) {
     pct: cap > 0 ? Math.round((windowTokens / cap) * 100) : null,
   };
 
-  // providers.<p>.windows scaffolding (spec section 4/5). Claude's primary window is
-  // just windowStats (computed above, across ALL providers' records — Phase 1 has no
-  // Codex reader so in practice this pass only ever sees Claude timestamps when Codex
-  // is absent; the block algorithm itself stays provider-agnostic by design) tagged
-  // with source/period metadata. Codex gets an "official" window formatted from an
-  // out-of-band snapshot the caller supplies — never computed/summed from records.
+  // providers.<p>.windows (spec section 4/5). Claude's primary window is just windowStats
+  // (computed above from Claude's records alone), tagged with source/period metadata. Codex
+  // gets an "official" window formatted from an out-of-band snapshot the caller supplies —
+  // never computed/summed from records, because OpenAI publishes the real percentage.
   const providers = {};
   for (const p of providerOrder) {
     const pb = providerBuckets.get(p);
@@ -295,6 +304,8 @@ export function aggregate(records, opts = {}) {
       byModel: pb.byModel,
       bySurface: pb.bySurface,
     };
+    // Mirrors the top-level rule: the cost block exists only when a pricing fn was injected.
+    if (costFn) entry.cost = pb.cost;
     if (p === "claude") {
       entry.windows = {
         primary: { ...windowStats, source: "inferred", period: "5h" },
@@ -318,6 +329,7 @@ export function aggregate(records, opts = {}) {
         byClass: { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 },
         byModel: {},
         bySurface: {},
+        ...(costFn ? { cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0 } } : {}),
       };
       if (!providerOrder.includes("codex")) providerOrder.push("codex");
     }

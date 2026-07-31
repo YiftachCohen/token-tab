@@ -100,7 +100,9 @@ final class AccessManager: ObservableObject {
     }
 
     /// Resolve the saved ~/.codex bookmark (if any) and hold its scope for the app's lifetime.
-    /// Mirrors resolveSavedBookmark; a stale bookmark is dropped (the phase-6 grant UI re-prompts).
+    /// Mirrors resolveSavedBookmark exactly, including the over-broad self-heal: a saved
+    /// home-folder bookmark is dropped rather than re-opened, so a grant that slipped through
+    /// an earlier build can't keep handing this app the whole home directory.
     @discardableResult
     private func resolveCodexBookmark() -> URL? {
         guard let data = UserDefaults.standard.data(forKey: codexDefaultsKey) else { return nil }
@@ -110,7 +112,12 @@ final class AccessManager: ObservableObject {
                                  relativeTo: nil,
                                  bookmarkDataIsStale: &stale) else { return nil }
         if stale { UserDefaults.standard.removeObject(forKey: codexDefaultsKey); return nil }
+        if Self.isOverBroadGrant(url) {
+            UserDefaults.standard.removeObject(forKey: codexDefaultsKey)
+            return nil
+        }
         codexScopedURL?.stopAccessingSecurityScopedResource()
+        codexScopedURL = nil
         guard url.startAccessingSecurityScopedResource() else { return nil }
         codexScopedURL = url
         codexGranted = true
@@ -130,11 +137,25 @@ final class AccessManager: ObservableObject {
         panel.showsHiddenFiles = true      // ~/.codex is a dotfile, hidden by default
         panel.prompt = "Grant read access"
         panel.message = "Token Tab reads token counts from ~/.codex. Select the .codex folder."
-        let codex = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
-        panel.directoryURL = FileManager.default.fileExists(atPath: codex.path) ? codex : FileManager.default.homeDirectoryForCurrentUser
+        // Point the panel at ~/.codex UNCONDITIONALLY, for the same reason as the Claude
+        // panel: powerbox runs out-of-process and can browse where this sandboxed app
+        // cannot even stat, so a fileExists() pre-check is always false in the sandbox and
+        // would silently drop the picker at the home folder — one click from granting it.
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex")
 
         guard panel.runModal() == .OK, let chosen = panel.url else { return false }
+        // Refuse a home-folder (or wider) grant, exactly as the Claude picker does. Codex's
+        // grant is the same read-only security-scoped mechanism, so it needs the same floor.
+        if Self.isOverBroadGrant(chosen) {
+            let alert = NSAlert()
+            alert.messageText = "That folder is too broad"
+            alert.informativeText = "Token Tab only reads Codex's logs. Select the .codex folder itself — not your home folder."
+            alert.runModal()
+            return requestCodexAccess()
+        }
         codexScopedURL?.stopAccessingSecurityScopedResource()
+        codexScopedURL = nil
         if let data = try? chosen.bookmarkData(options: [.withSecurityScope],
                                                includingResourceValuesForKeys: nil,
                                                relativeTo: nil) {

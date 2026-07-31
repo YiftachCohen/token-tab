@@ -8,10 +8,15 @@
 // reset guard per class. See .context/codex-support-design.md §2 and src/codex.mjs
 // (the reference implementation this mirrors exactly).
 //
-// TRUST BOUNDARY: the Decodable structs below physically contain ONLY the
-// whitelisted numeric/metadata fields (same pattern as LogReader.Line). There is
-// no field for `response_item` content, session_meta.instructions, or cwd, so no
-// code path can surface your prompts/code. No network, ever.
+// TRUST BOUNDARY, in two layers (mirroring src/codex.mjs):
+//   1. `topLevelType` reads each line's top-level `type` off the RAW STRING and drops
+//      anything outside the whitelist before the decoder ever sees it — so a
+//      `response_item` line's prompt/response text is never decoded or allocated.
+//   2. The Decodable structs below physically contain ONLY the whitelisted
+//      numeric/metadata fields (same pattern as LogReader.Line): there is no field for
+//      `response_item` content, session_meta.instructions, or cwd, so even a line that
+//      passes layer 1 has no code path that could surface your prompts/code.
+// No network, ever.
 
 import Foundation
 import TokenTabCore
@@ -64,6 +69,56 @@ enum CodexLogReader {
         guard let m = uuidRE.firstMatch(in: fileName, range: range),
               let r = Range(m.range(at: 1), in: fileName) else { return nil }
         return String(fileName[r])
+    }
+
+    /// The only three top-level `type` values we ever decode. Everything else — above all
+    /// `response_item`, the line that carries your prompts, responses and reasoning — is
+    /// dropped as an undecoded string. Mirrors DECODED_TYPES in src/codex.mjs.
+    private static let decodedTypes: Set<String> = ["session_meta", "turn_context", "event_msg"]
+
+    /// The characters a type token may contain — the Swift twin of TOP_TYPE_RE's char class.
+    private static let typeTokenChars = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+
+    /// Read a line's top-level `type` WITHOUT decoding the line — the content gate.
+    ///
+    /// Codex writes the envelope keys (`timestamp`, `type`, `payload`) before the payload, so
+    /// the first `"type": "..."` in the string IS the top-level one. Returns nil when the line
+    /// carries no such key at all; the caller then falls through to the decoder, so a genuinely
+    /// malformed line is still counted rather than silently dropped. If a nested field ever
+    /// matched first, the worst case is decoding a line we would have skipped — the `obj.type`
+    /// switch still refuses to read it — so this only fails toward the old behavior, never
+    /// toward surfacing content. Mirrors TOP_TYPE_RE in src/codex.mjs.
+    static func topLevelType(of line: String) -> String? {
+        var from = line.startIndex
+        while let key = line.range(of: "\"type\"", range: from..<line.endIndex) {
+            from = key.upperBound
+            if let value = quotedToken(in: line, after: key.upperBound) { return value }
+        }
+        return nil
+    }
+
+    /// `: "token"` immediately after `idx` (whitespace-tolerant), where token is non-empty and
+    /// made only of `typeTokenChars`. nil when the shape doesn't match, so the caller keeps
+    /// scanning — the same way the JS regex skips a non-matching candidate.
+    private static func quotedToken(in s: String, after idx: String.Index) -> String? {
+        var i = idx
+        func skipSpaces() {
+            while i < s.endIndex, s[i] == " " || s[i] == "\t" { i = s.index(after: i) }
+        }
+        skipSpaces()
+        guard i < s.endIndex, s[i] == ":" else { return nil }
+        i = s.index(after: i)
+        skipSpaces()
+        guard i < s.endIndex, s[i] == "\"" else { return nil }
+        i = s.index(after: i)
+        var token = ""
+        while i < s.endIndex, s[i] != "\"" {
+            guard typeTokenChars.contains(s[i]) else { return nil }
+            token.append(s[i])
+            i = s.index(after: i)
+        }
+        guard i < s.endIndex, !token.isEmpty else { return nil }
+        return token
     }
 
     /// The whitelisted fields of one JSONL line. No content field exists here on purpose.
@@ -144,6 +199,10 @@ enum CodexLogReader {
         for rawLine in lines {
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty { continue }
+            // Content gate — BEFORE the decoder. A non-whitelisted type is skipped as a raw
+            // string, so its content is never decoded. Not counted as malformed: it's a
+            // well-formed line we deliberately don't read.
+            if let top = Self.topLevelType(of: trimmed), !Self.decodedTypes.contains(top) { continue }
             guard let data = trimmed.data(using: .utf8),
                   let obj = try? decoder.decode(Line.self, from: data) else {
                 malformed += 1   // tolerate half-written / trailing lines

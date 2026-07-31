@@ -69,21 +69,38 @@ const ALIASES = {
 
 // ---------------------------------------------------------------------------
 // OpenAI (Codex) rate table — kept in its own map so the Claude table above
-// stays visually intact. Entries VERIFIED 2026-07-05 against
-// developers.openai.com/docs/pricing (standard tier). OpenAI model ids
-// are already clean (no dated snapshot / region prefix to strip) — just lowercase.
+// stays visually intact. Entries VERIFIED 2026-07-31 against OpenAI's per-model
+// API docs pages (standard tier). OpenAI model ids are already clean (no dated
+// snapshot / region prefix to strip) — just lowercase.
 //
-// Deliberately absent (unpriced by design — legacy/subscription-only, not on
-// OpenAI's current pricing page): gpt-5, gpt-5-codex, gpt-5.1-codex,
-// gpt-5.2-codex, codex-auto-review, <codex-unknown>. gpt-5.4-pro/gpt-5.5-pro
-// are also absent — not Codex CLI models. NO entry → the caller's existing
-// unpriced bucket. Never guess (see file header).
+// The GPT-5.6 family (Sol/Terra/Luna) went GA in Codex on 2026-07-09 and is now the
+// bulk of Codex traffic, so its absence here was not an edge case — it was most of
+// the bill. NOTE for the next update: Terra and Luna were REPRICED DOWN on 2026-07-30
+// (terra $2.50/$15 -> $2.00/$12, luna $1.00/$6 -> $0.20/$1.20). Most third-party
+// pricing pages still quote the launch rates; read OpenAI's own model pages.
+//
+// Cached input is 0.10x input for every entry here, which is what CACHE_MULTIPLIERS.codex
+// already encodes. Long-context (>272K input) surcharges are NOT modeled, consistent with
+// the rest of the table — see the stated tolerance in the file header.
+//
+// Deliberately absent (NO published rate we could verify — never guess, see file header):
+// gpt-5.3-codex-spark (research preview, "credit rates not final"), gpt-5.4-codex (no such
+// published model; a handful of stray log records), codex-auto-review (internal Codex slug),
+// <codex-unknown>. gpt-5.4-pro/gpt-5.5-pro are absent for a different reason — they're
+// priced, but they aren't Codex CLI models. NO entry → the caller's unpriced bucket.
 const OPENAI_RATES = {
+  "gpt-5.6-sol": { input: 5.0, output: 30.0 },
+  "gpt-5.6-terra": { input: 2.0, output: 12.0 },
+  "gpt-5.6-luna": { input: 0.2, output: 1.2 },
   "gpt-5.5": { input: 5.0, output: 30.0 },
   "gpt-5.4": { input: 2.5, output: 15.0 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5 },
   "gpt-5.4-nano": { input: 0.2, output: 1.25 },
   "gpt-5.3-codex": { input: 1.75, output: 14.0 },
+  "gpt-5.2-codex": { input: 1.75, output: 14.0 },
+  "gpt-5.1-codex": { input: 1.25, output: 10.0 },
+  "gpt-5.1-codex-max": { input: 1.25, output: 10.0 },
+  "gpt-5-codex": { input: 1.25, output: 10.0 },
 };
 
 // Per-provider {rates, aliases} lookup, keyed exactly like classifySurface/costOfUsage's

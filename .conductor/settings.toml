@@ -18,7 +18,18 @@ setup = "cd app && swift build"
 # unsandboxed dev path). It's a long-running MenuBarExtra agent, so it fits the Run button.
 # First kill any stale instance from a previous Run of THIS workspace (scoped to its build
 # dir) so re-running doesn't leave two identical menu-bar items behind.
-run = "pkill -f \"$CONDUCTOR_WORKSPACE_PATH/app/.build\" || true; cd app && swift run"
+#
+# Two things this line is careful about, both load-bearing:
+#   • `--product TokenTab`, not a bare `swift run`. The package has TWO executables
+#     (TokenTab + TokenTabLiveHelper), so an unqualified `swift run` aborts with
+#     "multiple executable products available" and never launches anything.
+#   • `exec` the built binary by ABSOLUTE path instead of letting `swift run` spawn it.
+#     `swift run` launches the app as a child with a *relative* argv
+#     (".build/arm64-apple-macosx/debug/TokenTab"), which the workspace-scoped `pkill`
+#     patterns below and above can never match. Exec'ing puts the absolute path in argv
+#     (so the patterns match) and makes the app itself the Run process (so Conductor's
+#     own stop reaches it directly, with the pkills as belt and braces).
+run = "pkill -f \"$CONDUCTOR_WORKSPACE_PATH/app/.build\" || true; cd \"$CONDUCTOR_WORKSPACE_PATH/app\" && swift build --product TokenTab && exec \"$CONDUCTOR_WORKSPACE_PATH/app/.build/debug/TokenTab\""
 
 # A menu-bar GUI app with no network server: there's no CONDUCTOR_PORT to separate
 # instances, and the menu bar itself is the shared surface. Run one workspace's app at
@@ -26,7 +37,8 @@ run = "pkill -f \"$CONDUCTOR_WORKSPACE_PATH/app/.build\" || true; cd app && swif
 run_mode = "nonconcurrent"
 
 # On archive, stop only the menu-bar app launched from THIS workspace's build directory.
-# `swift run` may leave the spawned app running after the Run process is signaled; the
-# pattern is scoped to the workspace path, so it never touches another workspace or an
-# installed copy. `|| true` keeps archive from failing when nothing is running.
+# The Run process may outlive the signal Conductor sends it; the pattern is scoped to the
+# workspace path — and matches because `run` execs the binary by absolute path — so it
+# never touches another workspace or an installed copy. `|| true` keeps archive from
+# failing when nothing is running.
 archive = "pkill -f \"$CONDUCTOR_WORKSPACE_PATH/app/.build\" || true"

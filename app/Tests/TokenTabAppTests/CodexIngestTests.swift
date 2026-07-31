@@ -160,19 +160,39 @@ final class CodexIngestTests: XCTestCase {
         XCTAssertEqual(out.codexRateLimits?.asOf, parseDate("2026-06-20T12:00:00.000Z"))
     }
 
+    /// The content gate is that `response_item` is never DECODED — not merely that its text
+    /// fails to escape. That's observable: the response_item line below is deliberately
+    /// truncated (unbalanced braces). If the decoder ever saw it, it would fail and land in
+    /// `malformed`. malformed == 0 is the proof the line was dropped as a raw string.
     func testNoContentResponseItemsNeverDecoded() {
         let lines = [
             #"{"type":"session_meta","timestamp":"2026-06-20T21:00:00.000Z","payload":{"id":"11111111-2222-3333-4444-555555555555","instructions":"SECRET PROMPT TEXT","cwd":"/secret/path"}}"#,
-            #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"text","text":"SECRET USER MESSAGE"}]}}"#,
+            #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"text","text":"SECRET USER MESSAGE"#,
+            #"{"type":"response_item","payload":{"type":"reasoning","content":"SECRET REASONING"}}"#,
             #"{"type":"turn_context","payload":{"model":"gpt-5.4","cwd":"/secret/path"}}"#,
             #"{"type":"event_msg","timestamp":"2026-06-20T21:01:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"total_tokens":15}},"rate_limits":null}}"#,
         ]
         let out = CodexLogReader.recordsFromLines(lines, fileName: "x.jsonl")
         XCTAssertEqual(out.records.count, 1)
+        XCTAssertEqual(out.malformed, 0,
+                       "an unparseable response_item must be skipped before the decoder, not decoded and rejected")
         // Records carry only whitelisted fields; nothing content-bearing can round-trip through them.
         let blob = out.records.map { "\($0.messageId ?? "")\($0.model)" }.joined()
         XCTAssertFalse(blob.contains("SECRET"), "no content field leaks into records")
         XCTAssertFalse(blob.contains("/secret/path"), "no cwd leaks")
+    }
+
+    /// The raw-string type reader itself: the whitelist decision must not depend on decoding.
+    func testTopLevelTypeReadsTheEnvelopeWithoutDecoding() {
+        XCTAssertEqual(CodexLogReader.topLevelType(of: #"{"timestamp":"t","type":"event_msg","payload":{}}"#), "event_msg")
+        XCTAssertEqual(CodexLogReader.topLevelType(of: #"{ "type" : "session_meta" }"#), "session_meta",
+                       "whitespace around the colon is tolerated, as in the JS regex")
+        XCTAssertEqual(CodexLogReader.topLevelType(of: #"{"type":"response_item","payload":{"type":"message"}}"#), "response_item",
+                       "the FIRST type wins — the envelope's, not the payload's")
+        // No usable `"type": "token"` shape ⇒ nil ⇒ the caller falls through to the decoder,
+        // so a genuinely malformed line is still counted.
+        XCTAssertNil(CodexLogReader.topLevelType(of: #"{"model":"gpt-5.4"}"#))
+        XCTAssertNil(CodexLogReader.topLevelType(of: #"{"a":"type","b":1}"#))
     }
 
     // MARK: - RecordCache v2

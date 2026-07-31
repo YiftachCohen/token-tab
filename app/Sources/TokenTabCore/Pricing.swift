@@ -59,20 +59,37 @@ public struct Pricing: CostModel {
 
     // ---------------------------------------------------------------------------
     // OpenAI (Codex) rate table — kept in its own map so the Claude table above stays
-    // visually intact. Entries VERIFIED 2026-07-05 against
-    // developers.openai.com/docs/pricing (standard tier). Mirrors OPENAI_RATES
-    // in pricing.mjs.
+    // visually intact. Entries VERIFIED 2026-07-31 against OpenAI's per-model API docs
+    // pages (standard tier). Mirrors OPENAI_RATES in pricing.mjs.
     //
-    // Deliberately absent (unpriced by design — legacy/subscription-only, not on OpenAI's
-    // current pricing page): gpt-5, gpt-5-codex, gpt-5.1-codex, gpt-5.2-codex,
-    // codex-auto-review, <codex-unknown>. gpt-5.4-pro/gpt-5.5-pro are also absent — not
-    // Codex CLI models. NO entry → the caller's existing unpriced bucket.
+    // The GPT-5.6 family (Sol/Terra/Luna) went GA in Codex on 2026-07-09 and is now the bulk
+    // of Codex traffic, so its absence here was not an edge case — it was most of the bill.
+    // NOTE for the next update: Terra and Luna were REPRICED DOWN on 2026-07-30 (terra
+    // $2.50/$15 -> $2.00/$12, luna $1.00/$6 -> $0.20/$1.20); most third-party pricing pages
+    // still quote the launch rates.
+    //
+    // Cached input is 0.10x input for every entry here, which cacheMultipliers(codex) already
+    // encodes. Long-context (>272K input) surcharges are NOT modeled, consistent with the rest
+    // of the table.
+    //
+    // Deliberately absent (NO published rate we could verify — never guess): gpt-5.3-codex-spark
+    // (research preview, "credit rates not final"), gpt-5.4-codex (no such published model),
+    // codex-auto-review (internal Codex slug), <codex-unknown>. gpt-5.4-pro/gpt-5.5-pro are
+    // absent for a different reason — they're priced, but they aren't Codex CLI models.
+    // NO entry → the caller's existing unpriced bucket.
     private static let openAIRates: [String: Rate] = [
+        "gpt-5.6-sol": Rate(input: 5.0, output: 30.0),
+        "gpt-5.6-terra": Rate(input: 2.0, output: 12.0),
+        "gpt-5.6-luna": Rate(input: 0.2, output: 1.2),
         "gpt-5.5": Rate(input: 5.0, output: 30.0),
         "gpt-5.4": Rate(input: 2.5, output: 15.0),
         "gpt-5.4-mini": Rate(input: 0.75, output: 4.5),
         "gpt-5.4-nano": Rate(input: 0.2, output: 1.25),
         "gpt-5.3-codex": Rate(input: 1.75, output: 14.0),
+        "gpt-5.2-codex": Rate(input: 1.75, output: 14.0),
+        "gpt-5.1-codex": Rate(input: 1.25, output: 10.0),
+        "gpt-5.1-codex-max": Rate(input: 1.25, output: 10.0),
+        "gpt-5-codex": Rate(input: 1.25, output: 10.0),
     ]
 
     private static let openAIAliases: [String: String] = [:]

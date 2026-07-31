@@ -20,15 +20,81 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
   `rate_limits`, the `turn_context` model, and the `session_meta` id; `response_item`
   (content) lines are skipped by type before any payload is decoded. Still no network,
   still nothing written. Cumulative token counts are diffed per session, with dedup for
-  resume/replay and per-class rate-limit resets. Five OpenAI models are priced
-  (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex`); anything else
-  stays honestly unpriced rather than costing $0.
+  resume/replay and per-class rate-limit resets. Twelve OpenAI models are priced — the
+  `gpt-5.6` Sol/Terra/Luna tier, `gpt-5.5`, the `gpt-5.4` family, and the `gpt-5.x-codex`
+  line (rates verified 2026-07-31 against OpenAI's per-model docs, including the
+  2026-07-30 Terra/Luna price cut). Ids with no published rate — a research preview, an
+  internal Codex slug — stay honestly unpriced rather than costing $0.
 - **Two-gauge Overview and a max-pressure menu bar.** The provider under the most 5-hour
-  pressure headlines (Codex reads as `42% Cdx`); the other becomes a compact secondary
-  row that swaps focus on tap, and is hidden when it has no usage. Only real percentages
-  compete for the headline — Codex's official `used_percent`, Claude's only with a
-  configured or live-calibrated cap — otherwise it falls back to combined today-tokens.
+  pressure headlines the Overview; the other becomes a compact secondary row that swaps
+  focus on tap, and is hidden when it has no usage. Only real percentages compete for the
+  headline — Codex's official `used_percent`, Claude's only with a configured or
+  live-calibrated cap — otherwise it falls back to combined today-tokens.
   A merged Claude+Codex percentage is deliberately never shown: it isn't a real number.
+- **The menu bar shows both providers.** When Claude and Codex both have usage, the bar
+  carries a gauge + figure per provider — `◔ 42%  ◕ 92%`, Claude always first, so position
+  identifies each one. A provider with usage but no real percentage gets a dot and its token
+  count rather than a ring implying a percentage that doesn't exist. Settings ▸ Providers ▸
+  **MENU BAR** switches back to the single max-pressure figure (which keeps its `Cdx`
+  suffix, since one glyph can't say whose it is). A Claude-only menu bar is unchanged.
+
+### Changed
+- **The menu-bar item is now an `NSStatusItem` hosting the SwiftUI label**, replacing the
+  `MenuBarExtra` scene. `MenuBarExtra` renders only one `Text` and one `Image` in its label,
+  which silently truncated the two-provider label to the first pair — the same limitation
+  that once made a custom SwiftUI `Shape` invisible there. The dropdown is unchanged: the
+  same `DropdownView` in a `.transient` `NSPopover`, which is what `.menuBarExtraStyle(.window)`
+  already was. **No trust-surface change** — AppKit windowing only, no new capability, and
+  the app still reads nothing but the granted log directories.
+- **Every menu-bar percentage now reads "% left", for both providers.** Codex's official
+  reading is natively `used_percent`, and showing it raw left the glyph and the number
+  disagreeing — a 92%-full ring beside the figure `8%`. Both rings already fill to
+  runway-left, so the figures match them now: 8% of the Codex window spent reads `92%`.
+  The dropdown still quotes Codex's native "% used" where there's room to label it. The
+  SwiftBar plugin's `◧` label changed the same way, so the two front-ends can't report the
+  same state differently on one Mac. No parsing or trust-surface change — display only.
+- **Each provider's numbers are now scoped to that provider.** Adding Codex quietly made
+  several Claude-labelled figures include Codex: the inferred 5-hour window summed both
+  providers' tokens (a Codex-heavy hour could read as 100% of the Claude cap), the
+  dominant-surface check let Codex volume flip Claude's panel into pay-per-token mode, and
+  the menu bar's Claude cost was the combined total. The 5-hour block now takes Claude
+  records only, mode is decided by Claude's own surfaces, and the aggregate carries
+  per-provider dollar subtotals (`providers.<p>.cost`, mirrored in both engines) that the
+  Claude-labelled figures read from. History likewise opens on the focused provider's
+  filter instead of `All`. Combined totals are unchanged and still labelled as combined.
+- **An expired Codex percentage is no longer treated as current.** Codex writes logs only
+  while it runs, so the last `rate_limits` snapshot persists indefinitely; once its
+  `resets_at` has passed, the recorded percentage describes a window that no longer
+  exists. It now stops competing for the menu-bar headline, stops drawing a ring, and is
+  labelled "last known" in the detail lines instead of "official" — in the app and in the
+  SwiftBar plugin alike.
+
+### Fixed
+- **The `~/.codex` grant is held to the same floor as `~/.claude`.** The Codex folder
+  picker refused nothing, so a single click while it sat at the home folder would have
+  handed the app the whole home directory, and a previously saved over-broad bookmark was
+  re-opened on launch without checking. Both now apply the same rejection and self-heal
+  the Claude grant has, and the picker points at `~/.codex` unconditionally (a
+  `fileExists` pre-check is always false inside the sandbox, which is what dropped it at
+  the home folder in the first place). **Trust-surface fix**, no capability added.
+- **Codex `response_item` lines are dropped before `JSON.parse`, not after.** The reader
+  decoded every line and only then discarded the content-bearing ones — the text was never
+  surfaced, but it was parsed and allocated, which is not what the trust contract says.
+  Both engines now read the top-level `type` off the raw string and skip non-whitelisted
+  lines undecoded. The no-content tests prove it by feeding in an *unparseable*
+  `response_item`: it has to be skipped silently rather than counted as malformed.
+- **Codex changes now update the bar immediately.** Only `~/.claude` had an FSEvents
+  watcher, so Codex-only activity waited on the 90-second safety refresh — up to about two
+  minutes. A second watcher on the Codex root starts and stops with the provider toggle.
+- **File diagnostics count both providers.** The native footer and the CLI's `files` figure
+  counted only Claude's logs, so a Codex-only run reported "0 files" underneath live Codex
+  usage. Both now report the total, with the per-provider split kept alongside it
+  (`filesByProvider` in `--json`).
+- **Trust footers name only the directories actually read.** The native footer ignored
+  `TOKENTAB_PROVIDERS` and the CLI assumed `~/.claude` was read whenever Codex was on, so a
+  single-provider configuration could claim a directory the run never opened. Both now
+  derive the wording from the resolved provider flags — and the native app honours
+  `TOKENTAB_PROVIDERS` for Claude too, so the flag means the same thing in both front-ends.
 
 ## [0.2.0] — 2026-07-29
 

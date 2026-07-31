@@ -24,8 +24,8 @@ struct CodexPanel: View {
     // The Codex hero is % LEFT of the official 5h limit. Codex is only ever focused when it
     // has usage, and usage implies a rate-limits snapshot, so these are populated here — but
     // we fail soft to an "idle" read if a snapshot is somehow absent.
-    private var usedPct: Int? { snapshot.codexUsedPct }
-    private var leftPct: Int? { snapshot.codexLeftPct }
+    private var usedPct: Int? { snapshot.codexUsedPct(now: now) }
+    private var leftPct: Int? { snapshot.codexLeftPct(now: now) }
     private var heroFraction: Double { Double(leftPct ?? 0) / 100 }
     private var stale: Bool { snapshot.codexStale(now: now) }
     private var resetAt: Date? { snapshot.codexPrimary?.resetAt }
@@ -55,8 +55,7 @@ struct CodexPanel: View {
 
                 // Interpretation line — the design's per-mode plain-language read.
                 VStack(spacing: 3) {
-                    Text(resetAt != nil ? "official 5-hour limit · resets \(Fmt.clock(resetAt))"
-                                        : "official 5-hour limit")
+                    Text(interpretation)
                         .font(.system(size: 12)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     if stale, let asOf = snapshot.codexAsOf {
@@ -72,7 +71,7 @@ struct CodexPanel: View {
             .padding(.horizontal, 17).padding(.top, 16)
 
             // THIS WEEK — the official weekly window as a secondary mini bar.
-            if let wk = snapshot.codexWeeklyUsedPct {
+            if let wk = snapshot.codexWeeklyUsedPct(now: now) {
                 Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 6) {
@@ -115,6 +114,17 @@ struct CodexPanel: View {
         }
         .padding(.bottom, 10)
         .onAppear { beat = true }
+    }
+
+    /// The line under the hero. Once the recorded window has passed its reset the gauge shows
+    /// "idle" (the % belongs to a window that no longer exists), so the caption must say that
+    /// rather than promise a reset that already happened — otherwise the panel reads as an
+    /// active quota with a mysteriously blank number.
+    private var interpretation: String {
+        guard let resetAt else { return "official 5-hour limit" }
+        return snapshot.codexWindowExpired(now: now)
+            ? "official 5-hour limit · window reset at \(Fmt.clock(resetAt))"
+            : "official 5-hour limit · resets \(Fmt.clock(resetAt))"
     }
 
     private var weeklyResetText: String {

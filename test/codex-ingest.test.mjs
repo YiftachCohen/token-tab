@@ -101,21 +101,28 @@ test("blank lines are ignored (not counted as malformed)", () => {
   assert.equal(out.records.length, 0);
 });
 
-// TRUST BOUNDARY: never decode response_item / content fields. We prove this by
-// handing the fold a response_item line whose content is deliberately INVALID
-// JSON-in-a-string is not possible (the line itself must parse), so instead we
-// assert that a well-formed response_item contributes nothing and that a
-// session_meta's `instructions` content is never surfaced anywhere.
-test("no-content: response_item lines emit nothing; instructions never read", () => {
+// TRUST BOUNDARY: response_item lines are never DECODED — not merely "decoded but
+// not surfaced". That distinction is observable: the second line below is a
+// deliberately TRUNCATED response_item (unbalanced braces). If it ever reached
+// JSON.parse it would throw and land in `malformed`. malformed === 0 is therefore
+// direct proof that the line was dropped as a raw string, its content never parsed
+// and never allocated. The final assertions still pin the second layer — that a
+// session_meta's `instructions`/`cwd` can't surface even from a decoded line.
+test("no-content: response_item lines are skipped before JSON.parse; instructions never read", () => {
   const lines = [
-    { type: "session_meta", timestamp: "2026-06-20T21:00:00.000Z", payload: { id: "11111111-2222-3333-4444-555555555555", instructions: "SECRET PROMPT TEXT", cwd: "/secret/path" } },
-    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "text", text: "SECRET USER MESSAGE" }] } },
-    { type: "response_item", payload: { type: "reasoning", content: "SECRET REASONING" } },
-    { type: "turn_context", payload: { model: "gpt-5.4", cwd: "/secret/path" } },
-    { type: "event_msg", timestamp: "2026-06-20T21:01:00.000Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 } }, rate_limits: null } },
-  ].map((o) => JSON.stringify(o));
+    JSON.stringify({ type: "session_meta", timestamp: "2026-06-20T21:00:00.000Z", payload: { id: "11111111-2222-3333-4444-555555555555", instructions: "SECRET PROMPT TEXT", cwd: "/secret/path" } }),
+    `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"text","text":"SECRET USER MESSAGE`,
+    JSON.stringify({ type: "response_item", payload: { type: "reasoning", content: "SECRET REASONING" } }),
+    JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.4", cwd: "/secret/path" } }),
+    JSON.stringify({ type: "event_msg", timestamp: "2026-06-20T21:01:00.000Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 } }, rate_limits: null } }),
+  ];
   const out = recordsFromCodexLines(lines, { fileName: "x.jsonl" });
   assert.equal(out.records.length, 1);
+  assert.equal(
+    out.malformed,
+    0,
+    "an unparseable response_item must be skipped BEFORE JSON.parse, not parsed and rejected",
+  );
   const blob = JSON.stringify(out);
   assert.ok(!blob.includes("SECRET"), "no content field must leak into records");
   assert.ok(!blob.includes("/secret/path"), "no cwd must leak");

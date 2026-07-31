@@ -1,45 +1,67 @@
 {
   "name": "exhaustive Codex (OpenAI) rate-table coverage — one record per OPENAI_RATES key (future-dated, so windows stay idle)",
-  "_comment": "Sibling to rates-all-models.json, kept separate because these records carry provider:'codex' and price at the Codex cache multipliers (write 0x, read 0.10x) rather than Claude's (write 1.25x, read 0.10x) -- mixing them into one fixture would make the per-model 'expected cost = input+output rate' shortcut wrong for either provider. THE COVERAGE CONTRACT: test/rates-coverage.test.mjs asserts records here == JS OPENAI_RATES keys (no Codex aliases exist yet); RatesCoverageTests.swift asserts the same against Pricing.openAIRatedModelIds. Adding a model to either engine's Codex table REQUIRES adding a record here (1M input + 1M output, no cache tokens; expected cost = input rate + output rate).",
+  "_comment": "Sibling to rates-all-models.json, kept separate because these records carry provider:'codex' and price at the Codex cache multipliers (write 0x, read 0.10x) rather than Claude's (write 1.25x, read 0.10x) -- mixing them into one fixture would make the per-model 'expected cost = input+output rate' shortcut wrong for either provider. THE COVERAGE CONTRACT: test/rates-coverage.test.mjs asserts records here == JS OPENAI_RATES keys (no Codex aliases exist -- Codex logs always write the full model slug); RatesCoverageTests.swift asserts the same against Pricing.openAIRatedModelIds. Adding a model to either engine's Codex table REQUIRES adding a record here (1M input + 1M output, no cache tokens; expected cost = input rate + output rate).",
   "now": "2026-06-01T00:00:00Z",
   "cap": 0,
   "records": [
-    { "messageId": "codex:rc01", "requestId": "token:0", "model": "gpt-5.5",         "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
-    { "messageId": "codex:rc02", "requestId": "token:0", "model": "gpt-5.4",         "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
-    { "messageId": "codex:rc03", "requestId": "token:0", "model": "gpt-5.4-mini",    "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
-    { "messageId": "codex:rc04", "requestId": "token:0", "model": "gpt-5.4-nano",    "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
-    { "messageId": "codex:rc05", "requestId": "token:0", "model": "gpt-5.3-codex",   "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false }
+    { "messageId": "codex:rc01", "requestId": "token:0", "model": "gpt-5.6-sol",       "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc02", "requestId": "token:0", "model": "gpt-5.6-terra",     "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc03", "requestId": "token:0", "model": "gpt-5.6-luna",      "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc04", "requestId": "token:0", "model": "gpt-5.5",           "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc05", "requestId": "token:0", "model": "gpt-5.4",           "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc06", "requestId": "token:0", "model": "gpt-5.4-mini",      "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc07", "requestId": "token:0", "model": "gpt-5.4-nano",      "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc08", "requestId": "token:0", "model": "gpt-5.3-codex",     "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc09", "requestId": "token:0", "model": "gpt-5.2-codex",     "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc10", "requestId": "token:0", "model": "gpt-5.1-codex",     "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc11", "requestId": "token:0", "model": "gpt-5.1-codex-max", "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "codex:rc12", "requestId": "token:0", "model": "gpt-5-codex",       "provider": "codex", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false }
   ],
   "expect": {
-    "total": 10000000,
+    "total": 24000000,
     "today": 0,
     "thisWeek": 0,
     "rolling5h": 0,
-    "bySurface": { "codex": 10000000 },
+    "bySurface": { "codex": 24000000 },
     "cost": {
-      "total": 74.95,
+      "total": 174.85,
       "today": 0,
       "byModel": {
+        "gpt-5.6-sol": 35.0,
+        "gpt-5.6-terra": 14.0,
+        "gpt-5.6-luna": 1.4,
         "gpt-5.5": 35.0,
         "gpt-5.4": 17.5,
         "gpt-5.4-mini": 5.25,
         "gpt-5.4-nano": 1.45,
-        "gpt-5.3-codex": 15.75
+        "gpt-5.3-codex": 15.75,
+        "gpt-5.2-codex": 15.75,
+        "gpt-5.1-codex": 11.25,
+        "gpt-5.1-codex-max": 11.25,
+        "gpt-5-codex": 11.25
       },
       "unpricedTokens": 0
     },
     "providerOrder": ["codex"],
     "providers": {
       "codex": {
-        "today": 0, "total": 10000000, "thisWeek": 0, "rolling5h": 0,
+        "today": 0, "total": 24000000, "thisWeek": 0, "rolling5h": 0,
         "byModel": {
+          "gpt-5.6-sol": 2000000,
+          "gpt-5.6-terra": 2000000,
+          "gpt-5.6-luna": 2000000,
           "gpt-5.5": 2000000,
           "gpt-5.4": 2000000,
           "gpt-5.4-mini": 2000000,
           "gpt-5.4-nano": 2000000,
-          "gpt-5.3-codex": 2000000
+          "gpt-5.3-codex": 2000000,
+          "gpt-5.2-codex": 2000000,
+          "gpt-5.1-codex": 2000000,
+          "gpt-5.1-codex-max": 2000000,
+          "gpt-5-codex": 2000000
         },
-        "bySurface": { "codex": 10000000 }
+        "bySurface": { "codex": 24000000 },
+        "cost": { "total": 174.85, "today": 0, "thisWeek": 0, "rolling5h": 0 }
       }
     }
   }

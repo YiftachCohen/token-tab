@@ -74,9 +74,11 @@ test("rates fixtures cover the JS rate tables exactly, per (provider, model)", (
   }
 });
 
-// Regression guard (design doc section 3): these ids are deliberately unpriced —
-// legacy/subscription-only ids absent from OpenAI's current pricing page, plus the two
-// "-pro" ids that aren't Codex CLI models at all. A guessed price is worse than an honest
+// Regression guard (design doc section 3): these ids are deliberately unpriced, for two
+// distinct reasons. gpt-5.3-codex-spark (research preview, rates explicitly "not final"),
+// gpt-5.4-codex (no such published model — a few stray log records) and codex-auto-review
+// (an internal Codex slug) have NO published rate we can verify; the two "-pro" ids are
+// priced but aren't Codex CLI models. Either way a guessed price is worse than an honest
 // "unknown", so this must stay red if any of them is ever added to OPENAI_RATES.
 test("known-unpriced Codex/legacy models are absent from the rate tables", () => {
   const claudeTable = new Set([...RATED_MODEL_IDS, ...ALIAS_IDS]);
@@ -84,9 +86,8 @@ test("known-unpriced Codex/legacy models are absent from the rate tables", () =>
   const shouldBeUnpriced = [
     "gpt-5.4-pro",
     "gpt-5.5-pro",
-    "gpt-5.2-codex",
-    "gpt-5.1-codex-max",
-    "gpt-5-codex",
+    "gpt-5.3-codex-spark",
+    "gpt-5.4-codex",
     "codex-auto-review",
   ];
   for (const id of shouldBeUnpriced) {

@@ -7,10 +7,13 @@
 // duplicate pairs. So we can't sum; we fold deltas per token class with an
 // independent reset guard per class. See .context/codex-support-design.md §2.
 //
-// TRUST BOUNDARY: we parse each line's `type` first and then destructure ONLY
-// the whitelisted numeric/metadata fields. `response_item` lines (and any
-// content field, incl. session_meta.instructions) are NEVER decoded/read. The
-// no-content test pins this.
+// TRUST BOUNDARY: we read each line's top-level `type` off the RAW STRING and
+// drop anything outside the whitelist before it ever reaches JSON.parse — so a
+// `response_item` line's prompt/response text is never decoded, never allocated,
+// never in this process's heap. Lines that survive the pre-filter are then
+// destructured for the whitelisted numeric/metadata fields only (content fields,
+// incl. session_meta.instructions and cwd, have no code path out). The
+// no-content test pins both halves.
 
 import { createReadStream, readdirSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -68,6 +71,20 @@ function uuidFromFileName(fileName) {
   return m ? m[1] : null;
 }
 
+// The only three top-level `type` values we ever decode. Everything else — above
+// all `response_item`, the line that actually carries your prompts, responses and
+// reasoning — is dropped as an undecoded string.
+const DECODED_TYPES = new Set(["session_meta", "turn_context", "event_msg"]);
+
+// First `"type": "..."` in the raw line. Codex writes the top-level envelope keys
+// (`timestamp`, `type`, `payload`) before the payload, so the first match IS the
+// top-level type. If a nested field ever matched first, the worst case is that we
+// decode a line we would have skipped — the `obj.type` switch below still refuses
+// to read it — so this only ever fails toward the existing behavior, never toward
+// surfacing content. A line with no `"type"` at all falls through to JSON.parse so
+// the malformed-line count stays honest.
+const TOP_TYPE_RE = /"type"\s*:\s*"([A-Za-z0-9_.-]+)"/;
+
 /**
  * Pure per-file fold (spec §2). Takes the file's lines (strings) and returns
  * the emitted UsageRecords plus diagnostics and the file's latest rate_limits
@@ -95,6 +112,11 @@ export function recordsFromCodexLines(lines, { fileName } = {}) {
 
   for (const line of lines) {
     if (typeof line !== "string" || !line.trim()) continue;
+    // Content gate — BEFORE JSON.parse. A non-whitelisted type is skipped as a raw
+    // string, so its content is never decoded. Not counted as malformed: it's a
+    // well-formed line we deliberately don't read.
+    const topType = TOP_TYPE_RE.exec(line);
+    if (topType && !DECODED_TYPES.has(topType[1])) continue;
     let obj;
     try {
       obj = JSON.parse(line);

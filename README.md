@@ -123,7 +123,9 @@ and only once you turn it on:
 
 2. **Grant read access.** On first launch it asks for a one-time, scoped, read-only
    grant on `~/.claude`. That's it — token counts, cost estimates, and the 5-hour
-   window all work from there, no further setup.
+   window all work from there, no further setup. Codex users get a second, separate
+   read-only grant on `~/.codex`, offered under **Settings ▸ Providers** (a distinct
+   scope, not a widening of the first — and the same toggle turns Codex back off).
 
 3. **On Max/Pro: click "Turn on Live %"** (in the dropdown's live row, or Settings).
    One click — no cloning the repo, no Node, no Terminal. It registers a helper
@@ -160,10 +162,17 @@ below) is what feeds live `%` into the CLI or SwiftBar's `…-live.2m.sh` varian
 ## Accuracy
 
 Validated against [`ccusage`](https://github.com/ryoppippi/ccusage) on real logs:
-**99.997% match** on Claude token counts. Two notes:
+**99.997% match** on Claude token counts. Three notes:
 
-- `ccusage` now also counts Codex (`gpt-5.5`); Token Tab is Claude-only, so compare
-  Claude-only subtotals.
+- **Compare like with like.** Both tools now read Claude *and* Codex logs, and `ccusage`
+  folds them into one daily figure — so scope both sides the same way or the day totals
+  can't line up. On Claude logs the two agree per model to within ~0.03%.
+- **Codex is counted differently on purpose.** Codex logs a *cumulative* `token_count`
+  per session, which resets mid-file on compaction and sometimes repeats a pair, so
+  Token Tab folds per-class deltas with a per-class reset guard and suppresses the
+  duplicates instead of summing the events — which is why its Codex totals run below a
+  straight sum on days with duplicated pairs. The check that matters is that they track
+  the official `rate_limits` percentages OpenAI writes into the same logs.
 - Streaming emits several usage lines per message that share one id, with
   `output_tokens` growing across them; the parser keeps the last (final) line. It's the
   one dedup rule that moves the total, and a test pins it.
@@ -177,17 +186,21 @@ by default (no network, no key). Scope:
 - **An estimate, not your bill.** Bedrock region surcharges and cache-TTL nuances
   aren't modeled.
 - **The rate table is [`src/pricing.mjs`](src/pricing.mjs)** — Anthropic's published
-  USD-per-million list rates, there to audit and edit. Cache classes derive from the
-  input rate by Anthropic's multipliers: cache **write** = 1.25× input (the 5-minute
-  rate; logs don't record the TTL), cache **read** = 0.10× input. All four token
-  classes are priced separately.
+  USD-per-million list rates, plus OpenAI's for every Codex model with a published one
+  (the `gpt-5.6` Sol/Terra/Luna tier, `gpt-5.5`, the `gpt-5.4` family, and the
+  `gpt-5.x-codex` line). Ids with no published rate — a research preview, an internal
+  Codex slug — land unpriced rather than guessed (below). All of it is there to audit
+  and edit. Cache classes derive from the input rate by each vendor's multipliers:
+  Anthropic bills cache **write** at 1.25× input (the 5-minute rate; logs don't record
+  the TTL) and cache **read** at 0.10×; OpenAI doesn't bill a cache-write step at all,
+  and reads at the same 0.10×. All four token classes are priced separately.
 - **`[1m]` and Bedrock ids normalize to the base model** — no long-context premium on
   current models; `us.anthropic.<id>` reuses the same list rate.
 - **Unknown model ⇒ tokens counted, price not invented.** It still counts toward every
   token total; it just lands in an `unpriced` line instead of getting a guessed dollar
   figure.
 
-Token counts reconcile with `ccusage` (per-model within ~0.03%). The **dollar totals
+Claude token counts reconcile with `ccusage` (per-model within ~0.03%). The **dollar totals
 differ by design** — `ccusage` prices off LiteLLM's community table, Token Tab off
 Anthropic's list rates — so expect divergence on cache-heavy, Opus-tier usage. Token
 Tab's rates sit in one short, editable file.
@@ -202,6 +215,8 @@ Set these as env vars, or in a local `KEY=VALUE` file kept out of the repo —
 |---|---|
 | `TOKENTAB_LOG_DIR` | non-default log directory (default `~/.claude/projects`) |
 | `CLAUDE_CONFIG_DIR` | reads `$CLAUDE_CONFIG_DIR/projects` |
+| `TOKENTAB_PROVIDERS` | which providers to read — `all`, or a comma list of `claude`,`codex` (default: every one whose log directory exists; a missing one is silently skipped) |
+| `TOKENTAB_CODEX_LOG_DIR` | non-default Codex root, holding `sessions/` and `archived_sessions/` (default `$CODEX_HOME`, else `~/.codex`) |
 | `TOKENTAB_WINDOW_CAP` | your plan's 5h token cap, to show a window `%` (see below) |
 | `CLAUDE_CODE_USE_BEDROCK` | Claude Code's Bedrock flag; switches the app to the pay-per-token panel² |
 | `TOKENTAB_LIVE` | opt in to the live server `%` via `claude -p "/usage"` for the CLI/SwiftBar (off by default; the app uses the one-click toggle instead) |
@@ -229,6 +244,11 @@ resets usage in fixed 5-hour blocks anchored to your first message of the block)
   the fallback for CLI/SwiftBar use or if you'd rather set it by hand: open Claude's
   `/usage`, note "N% used", and set the cap to `current-window-tokens / (N/100)`. For
   example, 20M at 5% ⇒ `TOKENTAB_WINDOW_CAP=400000000`.
+- **Codex needs none of that.** OpenAI writes the real figures into the rollout logs —
+  a `rate_limits` snapshot carrying the 5-hour primary and the weekly secondary
+  percentage — so Token Tab quotes them (as of the last snapshot) rather than inferring
+  anything. Worth keeping straight when you read the two side by side: Claude's `%` is a
+  local estimate (or a live reading), Codex's is OpenAI's own number.
 
 ## Live server %
 

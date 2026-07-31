@@ -276,6 +276,19 @@ public struct CodexPlan: Sendable {
     }
 }
 
+/// Dollars scoped to one provider (mirrors `providers.<p>.cost` in core.mjs). The combined
+/// `CostSummary` is every provider's spend added together; a UI that labels a figure with a
+/// provider's name needs that provider's own, or one priced Codex record inflates what is
+/// presented as Claude's cost. Present only when a cost model was injected.
+public struct ProviderCost: Sendable {
+    public var total: Double = 0
+    public var today: Double = 0
+    public var thisWeek: Double = 0
+    public var rolling5h: Double = 0
+
+    public init() {}
+}
+
 /// Per-provider subtotal — the same shape the combined `Aggregate` carries, scoped to
 /// one provider's records (see core.mjs `providerBucket`). Only providers actually
 /// present in the input records get an entry.
@@ -287,6 +300,7 @@ public struct ProviderSubtotal: Sendable {
     public var byClass = TokenUsage()
     public var byModel: [String: Int] = [:]
     public var bySurface: [Surface: Int] = [:]
+    public var cost: ProviderCost?
     public var windows: [String: ProviderWindow] = [:]   // "primary" / "secondary"
     public var plan: CodexPlan?
 
@@ -344,12 +358,19 @@ public struct Aggregate: Sendable {
 
     public init() {}
 
-    /// Dominant non-untracked surface → the app's MODE. Mixed machines fall back to
-    /// the larger surface (the dropdown still shows the per-surface breakdown).
+    /// Dominant non-untracked surface → the app's MODE. Mixed machines fall back to the
+    /// larger surface (the dropdown still shows the per-surface breakdown).
+    ///
+    /// Ranked over CLAUDE's records only. The mode this feeds is Claude's — subscription
+    /// runway vs pay-per-token burn — so a machine that happens to run more Codex than
+    /// Claude must not flip the Claude panel into burn mode (and the CLI must not suppress
+    /// its Claude subscription section). `.codex` is excluded belt-and-braces for a legacy
+    /// aggregate that has no per-provider subtotals. Mirrors dominantSurface() in token-tab.mjs.
     public var dominantSurface: Surface {
+        let source = providers["claude"]?.bySurface ?? bySurface
         var best: Surface = .untracked
         var bestN = -1
-        for (s, n) in bySurface where s != .untracked && n > bestN {
+        for (s, n) in source where s != .untracked && s != .codex && n > bestN {
             best = s; bestN = n
         }
         return best
@@ -484,6 +505,11 @@ public func aggregate(_ records: [UsageRecord],
     agg.window.blockSeconds = options.blockHours * 3600
     var costSummary = CostSummary()
     var unpricedModels = Set<String>()
+    // Window-block inputs: past-dated CLAUDE records only. The inferred 5h block is
+    // Anthropic's rate-limit window; feeding another provider's timestamps into it would
+    // inflate Claude's window tokens (and its cap %) with usage Anthropic never billed —
+    // a Codex-heavy trace could read as 100% of the Claude cap. Each provider has its own
+    // window under providers.* (Codex's is official, never inferred). Mirrors core.mjs.
     var stamps: [(t: Double, sum: Int)] = []
     let haveCost = costModel != nil
     var providerBuckets: [String: ProviderSubtotal] = [:]
@@ -501,7 +527,11 @@ public func aggregate(_ records: [UsageRecord],
 
         let provider = r.provider ?? "claude"
         if providerBuckets[provider] == nil {
-            providerBuckets[provider] = ProviderSubtotal()
+            var b = ProviderSubtotal()
+            // Mirrors the top-level rule: the cost block exists only when a cost model
+            // was injected, so a costless aggregate carries no zero-dollar figures.
+            if haveCost { b.cost = ProviderCost() }
+            providerBuckets[provider] = b
             providerOrder.append(provider)
         }
 
@@ -524,6 +554,7 @@ public func aggregate(_ records: [UsageRecord],
             usd = c.usd; priced = c.priced
             if priced {
                 costSummary.total += usd
+                providerBuckets[provider]!.cost?.total += usd
                 costSummary.byModel[base, default: 0] += usd
             } else {
                 costSummary.unpricedTokens += sum
@@ -557,18 +588,28 @@ public func aggregate(_ records: [UsageRecord],
                 if tms > rollingCutoff { agg.rolling5h += sum; providerBuckets[provider]!.rolling5h += sum }
                 if tms > hourCutoff { agg.lastHourTokens += sum }
                 if priced {
-                    if dayKey == todayKey { costSummary.today += usd }
-                    if tms >= weekStart { costSummary.thisWeek += usd }
-                    if tms > rollingCutoff { costSummary.rolling5h += usd }
+                    if dayKey == todayKey {
+                        costSummary.today += usd
+                        providerBuckets[provider]!.cost?.today += usd
+                    }
+                    if tms >= weekStart {
+                        costSummary.thisWeek += usd
+                        providerBuckets[provider]!.cost?.thisWeek += usd
+                    }
+                    if tms > rollingCutoff {
+                        costSummary.rolling5h += usd
+                        providerBuckets[provider]!.cost?.rolling5h += usd
+                    }
                     if tms > hourCutoff { costSummary.lastHour += usd }
                 }
-                stamps.append((tms, sum))
+                if provider == "claude" { stamps.append((tms, sum)) }
             }
         }
     }
 
-    // Pass 3 — current usage window (fixed blockHours reset blocks, anchored to the
-    // first message of the block — verified against Claude's /usage).
+    // Pass 3 — Claude's current usage window (fixed blockHours reset blocks, anchored to
+    // the first message of the block — verified against Claude's /usage), built from
+    // Claude records only (see `stamps` above).
     let blockSeconds = options.blockHours * 3600
     stamps.sort { $0.t < $1.t }
     struct Block { var start: Double; var lastT: Double; var tokens: Int }
@@ -601,10 +642,9 @@ public func aggregate(_ records: [UsageRecord],
         agg.cost = costSummary
     }
 
-    // providers.<p>.windows scaffolding (design doc section 4/5). Claude's primary window
-    // mirrors agg.window (computed above, provider-agnostic by construction — Phase 1 has
-    // no Codex reader, so in practice this only ever sees Claude timestamps when Codex is
-    // absent) tagged with source/period metadata.
+    // providers.<p>.windows (design doc section 4/5). Claude's primary window mirrors
+    // agg.window (computed above from Claude's records alone), tagged with source/period
+    // metadata.
     if providerBuckets["claude"] != nil {
         providerBuckets["claude"]!.windows["primary"] = ProviderWindow(
             source: "inferred", period: "5h",
@@ -613,10 +653,12 @@ public func aggregate(_ records: [UsageRecord],
     }
 
     // Codex's windows come entirely from an out-of-band official snapshot (never derived
-    // from records — Phase 1 has no Codex reader). Formatting only.
+    // from records — OpenAI publishes the real percentage). Formatting only.
     if let snap = options.codexRateLimits {
         if providerBuckets["codex"] == nil {
-            providerBuckets["codex"] = ProviderSubtotal()
+            var b = ProviderSubtotal()
+            if haveCost { b.cost = ProviderCost() }
+            providerBuckets["codex"] = b
             providerOrder.append("codex")
         }
         if let p = snap.primary {

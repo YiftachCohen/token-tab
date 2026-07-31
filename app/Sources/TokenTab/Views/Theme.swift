@@ -31,6 +31,10 @@ enum Theme {
     static let muted = dynamic(light: 0x76736D, dark: 0x9AA1B1)
     static let faint = dynamic(light: 0xA29E97, dark: 0x73798A)
     static let onAccent = Color(hex8: 0x0C0E13)   // dark text that reads on a green fill in either mode
+    /// Menu-bar figures while the dropdown is open: the status item paints the system selection
+    /// fill behind the label, and AppKit auto-inverts only a plain template image — a hosted
+    /// SwiftUI label has to say so itself, or it stays dark on the accent.
+    static let onMenuSelection = Color.white
 
     // Structure.
     static let track      = Color.primary.opacity(0.08)

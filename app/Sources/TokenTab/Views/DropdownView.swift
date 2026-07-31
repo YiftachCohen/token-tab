@@ -115,8 +115,7 @@ struct DropdownView: View {
     /// when Claude is focused (and vice versa). Tapping sets an explicit focus in the store.
     @ViewBuilder private func secondaryRow(focused: Provider, now: Date) -> some View {
         let other: Provider = focused == .claude ? .codex : .claude
-        let show = other == .codex ? store.snapshot.codexHasUsage
-                                   : (store.snapshot.agg.providers["claude"]?.total ?? store.snapshot.agg.total) > 0
+        let show = other == .codex ? store.snapshot.codexHasUsage : store.snapshot.claudeHasUsage
         if show {
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 4)
             SecondaryProviderRow(provider: other, snapshot: store.snapshot, now: now) {
@@ -185,7 +184,7 @@ struct DropdownView: View {
             .padding(.horizontal, 15).padding(.vertical, 9)
             .background(Theme.subtleFill)
             Text(store.hasLoadedOnce
-                 ? "updated \(updatedAgo(store.snapshot.lastUpdated)) · \(store.snapshot.fileCount) files"
+                 ? "updated \(updatedAgo(store.snapshot.lastUpdated)) · \(store.snapshot.totalFileCount) files"
                  : "loading…")
                 .font(.system(size: 9.5)).foregroundStyle(Theme.faint)
                 .frame(maxWidth: .infinity)
@@ -193,21 +192,34 @@ struct DropdownView: View {
         }
     }
 
-    /// Whether the Codex directory is actually being read (enabled AND present on disk) — the
-    /// gate for the "+ ~/.codex" clause in the trust footer.
-    private var codexActive: Bool { store.codexEnabled && store.codexDirExists }
-
-    /// The mode/tab-specific trust line. When Codex is active, every state names both dirs
-    /// being read ("… reads ~/.claude + ~/.codex"); otherwise the existing wording stands.
-    private var trustText: String {
-        if codexActive {
-            if tab == .history { return "Computed on-device · reads ~/.claude + ~/.codex" }
-            return "0 network calls · reads ~/.claude + ~/.codex"
+    /// The directories the LAST REFRESH actually opened, named exactly. This is a trust claim,
+    /// so it's derived from the store's resolved provider flags (dir present + TOKENTAB_PROVIDERS
+    /// + the Codex toggle) rather than re-guessed here: a `TOKENTAB_PROVIDERS=codex` Mac must not
+    /// be told this app read ~/.claude. Empty only in the (unreachable) both-off case, where the
+    /// generic line below stands in.
+    private var readsClause: String {
+        switch (store.claudeActive, store.codexActive) {
+        case (true, true):   return "reads ~/.claude + ~/.codex"
+        case (true, false):  return "reads ~/.claude"
+        case (false, true):  return "reads ~/.codex"
+        case (false, false): return ""
         }
-        if tab == .history { return "Computed on-device · 0 network calls" }
-        return store.snapshot.mode == .burn
-            ? "0 network calls · reads ~/.claude"
-            : "Local only — nothing leaves this Mac"
+    }
+
+    /// The mode/tab-specific trust line, naming whichever directories were actually read.
+    private var trustText: String {
+        let reads = readsClause
+        if reads.isEmpty {
+            return tab == .history ? "Computed on-device · 0 network calls"
+                                   : "Local only — nothing leaves this Mac"
+        }
+        if tab == .history { return "Computed on-device · \(reads)" }
+        // The subscription Overview keeps its warmer line when Claude is the only source —
+        // that wording predates providers and is what the design specifies for that panel.
+        if store.snapshot.mode != .burn && !store.codexActive {
+            return "Local only — nothing leaves this Mac"
+        }
+        return "0 network calls · \(reads)"
     }
 
     private var loading: some View { LoadingView() }

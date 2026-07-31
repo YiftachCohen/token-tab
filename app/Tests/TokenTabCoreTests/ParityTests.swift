@@ -227,6 +227,19 @@ final class ParityTests: XCTestCase {
                     }
                 }
 
+                // Per-provider dollars. The combined cost.* block sums every provider, so
+                // this is the only honest source for a figure a UI labels with one provider's
+                // name (see MenuBarLabel's dual Claude pair).
+                if let ec = ep["cost"] as? [String: Any] {
+                    guard let pc = pb.cost else {
+                        XCTFail("providers.\(p).cost missing (Pricing was injected) \(ctx)"); continue
+                    }
+                    if let v = ec["total"] as? Double { XCTAssertEqual(pc.total, v, accuracy: 1e-9, "providers.\(p).cost.total \(ctx)") }
+                    if let v = ec["today"] as? Double { XCTAssertEqual(pc.today, v, accuracy: 1e-9, "providers.\(p).cost.today \(ctx)") }
+                    if let v = ec["thisWeek"] as? Double { XCTAssertEqual(pc.thisWeek, v, accuracy: 1e-9, "providers.\(p).cost.thisWeek \(ctx)") }
+                    if let v = ec["rolling5h"] as? Double { XCTAssertEqual(pc.rolling5h, v, accuracy: 1e-9, "providers.\(p).cost.rolling5h \(ctx)") }
+                }
+
                 if let windowsExpect = ep["windows"] as? [String: Any] {
                     for (wk, wraw) in windowsExpect {
                         guard let ew = wraw as? [String: Any] else { continue }

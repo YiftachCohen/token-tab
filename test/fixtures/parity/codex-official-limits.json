@@ -23,7 +23,7 @@
     "rolling5h": 0,
     "bySurface": { "codex": 600 },
     "byModel": { "gpt-5.2-codex": 600 },
-    "cost": { "unpricedTokens": 600 },
+    "cost": { "unpricedTokens": 0, "total": 0.002275 },
     "providerOrder": ["codex"],
     "providers": {
       "codex": {

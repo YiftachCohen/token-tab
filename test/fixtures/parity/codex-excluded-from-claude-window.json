@@ -1,0 +1,57 @@
+{
+  "name": "codex records never enter Claude's inferred 5h window (or its cap %), but do count in every combined total",
+  "_comment": "The regression this pins: the 5h block is ANTHROPIC's rate-limit window, so only Claude timestamps may feed it. 100 Claude tokens + 900 Codex tokens against a 1000-token cap must read as 100 tokens / 10%, not 1000 / 100%. Every pinned field is timezone-independent: window.* and rolling5h are pure epoch arithmetic against the injected `now` (2026-06-20T15:00Z, one hour into a block that opened at 14:00Z and resets at 19:00Z). today/thisWeek are local-calendar and deliberately NOT pinned. Also pins providers.<p>.cost — the per-provider dollar subtotals a UI needs before it can label a figure with one provider's name.",
+  "now": "2026-06-20T15:00:00Z",
+  "cap": 1000,
+  "records": [
+    {
+      "messageId": "c1", "requestId": "cr1", "model": "claude-opus-4-8",
+      "usage": { "input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T14:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-w", "requestId": "token:0", "model": "gpt-5.4", "provider": "codex",
+      "usage": { "input_tokens": 500, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T14:10:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-w", "requestId": "token:1", "model": "gpt-5.4", "provider": "codex",
+      "usage": { "input_tokens": 400, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-06-20T14:20:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 1000,
+    "rolling5h": 1000,
+    "bySurface": { "subscription": 100, "codex": 900 },
+    "byModel": { "claude-opus-4-8": 100, "gpt-5.4": 900 },
+    "window": {
+      "active": true,
+      "tokens": 100,
+      "pct": 10,
+      "calibratedCap": 0,
+      "resetMs": 1781982000000
+    },
+    "providerOrder": ["claude", "codex"],
+    "providers": {
+      "claude": {
+        "total": 100,
+        "rolling5h": 100,
+        "bySurface": { "subscription": 100 },
+        "cost": { "total": 0.0005, "rolling5h": 0.0005 },
+        "windows": {
+          "primary": { "source": "inferred", "period": "5h", "cap": 1000, "calibratedCap": 0, "resetAtMs": 1781982000000 }
+        }
+      },
+      "codex": {
+        "total": 900,
+        "rolling5h": 900,
+        "bySurface": { "codex": 900 },
+        "cost": { "total": 0.00225, "rolling5h": 0.00225 }
+      }
+    },
+    "cost": {
+      "total": 0.00275
+    }
+  }
+}

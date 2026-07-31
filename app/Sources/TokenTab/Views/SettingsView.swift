@@ -81,6 +81,17 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                // MENU BAR scope belongs to this section, not to the mode-specific panels: it
+                // is a question about the two providers above. Hidden when Codex is off, since
+                // "Both" has nothing to show then (the label degrades to the single figure).
+                if store.codexEnabled {
+                    Divider().background(Theme.hairline).padding(.top, 3)
+                    SectionLabel(text: "MENU BAR")
+                    Text("Both shows a gauge per provider (Claude first). It falls back to one figure — whichever provider is under more pressure — until both have usage.")
+                        .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    scopePicker
+                }
             }
             .padding(.horizontal, 17).padding(.top, 14)
 
@@ -235,8 +246,23 @@ struct SettingsView: View {
     }
 
     private func modeSeg(_ title: String, _ tag: String) -> some View {
-        let on = modeSelection.wrappedValue == tag
-        return Text(title)
+        seg(title, on: modeSelection.wrappedValue == tag) { modeSelection.wrappedValue = tag }
+    }
+
+    /// Which providers the menu-bar label covers (2026-07-30 DESIGN.md row). Same track/segment
+    /// treatment as `modePicker`, so the two controls in this panel read as one control type.
+    private var scopePicker: some View {
+        HStack(spacing: 2) {
+            seg("Headline", on: store.menuBarScope == .headline) { store.menuBarScope = .headline }
+            seg("Both", on: store.menuBarScope == .both) { store.menuBarScope = .both }
+        }
+        .padding(2)
+        .background(Theme.subtleFill, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// One segment of an on-brand segmented control: green fill + soft glow when selected.
+    private func seg(_ title: String, on: Bool, select: @escaping () -> Void) -> some View {
+        Text(title)
             .font(.system(size: 11, weight: on ? .semibold : .medium))
             .foregroundStyle(on ? Theme.onAccent : Theme.muted)
             .lineLimit(1).minimumScaleFactor(0.85)
@@ -245,7 +271,7 @@ struct SettingsView: View {
             .background(on ? Theme.green : .clear, in: RoundedRectangle(cornerRadius: 6))
             .shadow(color: on ? Theme.green.opacity(0.3) : .clear, radius: 4, y: 1)
             .contentShape(Rectangle())
-            .onTapGesture { modeSelection.wrappedValue = tag }
+            .onTapGesture(perform: select)
             .accessibilityElement()
             .accessibilityLabel(title)
             .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)

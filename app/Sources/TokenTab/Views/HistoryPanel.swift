@@ -40,7 +40,13 @@ struct HistoryPanel: View {
         _range = State(initialValue: 14)
         // Codex has no cost dimension worth defaulting to (many models unpriced) → tokens.
         _metric = State(initialValue: (mode == .subscription || focused == .codex) ? .tokens : .cost)
-        _scope = State(initialValue: focused == .codex ? .codex : .all)
+        // Open on the FOCUSED provider, both ways: a Claude-focused Overview must not drop
+        // into a chart that folds Codex's days into Claude's. `.all` is reserved for the
+        // Claude-only case, where the filter isn't even shown — there, `.claude` and `.all`
+        // would be the same series anyway, and `.all` can't accidentally hide a stray
+        // gpt-named Claude model behind the model-id heuristic.
+        _scope = State(initialValue: focused == .codex ? .codex
+                                   : (snapshot.codexHasUsage ? .claude : .all))
     }
 
     // MARK: derived series

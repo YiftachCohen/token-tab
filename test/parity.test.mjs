@@ -86,6 +86,18 @@ for (const file of files) {
             assert.equal(pb.bySurface[k] ?? 0, ep.bySurface[k], `providers.${p}.bySurface.${k}`);
           }
         }
+        // Per-provider dollars. The combined cost.* block sums every provider, so this is
+        // the only honest source for a figure a UI labels with one provider's name.
+        if (ep.cost) {
+          assert.ok(pb.cost, `providers.${p}.cost present (a cost fn was injected)`);
+          for (const k of ["total", "today", "thisWeek", "rolling5h"]) {
+            if (k in ep.cost)
+              assert.ok(
+                approx(pb.cost[k], ep.cost[k]),
+                `providers.${p}.cost.${k} ${pb.cost[k]} != ${ep.cost[k]}`,
+              );
+          }
+        }
         if (ep.windows) {
           for (const wk of Object.keys(ep.windows)) {
             const w = pb.windows?.[wk];

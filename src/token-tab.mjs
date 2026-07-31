@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { aggregate, recordFromLine, classifySurface } from "./core.mjs";
 import { costOfUsage } from "./pricing.mjs";
-import { readCodexUsage, resolveCodexRoot } from "./codex.mjs";
+import { readCodexUsage, resolveCodexRoot, findCodexJsonl } from "./codex.mjs";
 
 function resolveLogDir() {
   if (process.env.TOKENTAB_LOG_DIR) return process.env.TOKENTAB_LOG_DIR;
@@ -159,25 +159,60 @@ function fmtClock(ms) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-// Most-pressured-provider headline (design doc §6): only REAL percentages compete —
-// Codex's official used_percent, and Claude's % only when a cap (TOKENTAB_WINDOW_CAP)
-// makes agg.window.pct real. Inferred time-left never competes with a quota-%. Returns
-// {provider, pct} for whichever is more pressured, or null when neither has a real %.
-function realPct(agg) {
+// One official Codex window as a line. A window past its resetAt is labelled "last known"
+// rather than "official": the percentage is real, but it belongs to a window that has since
+// reset, so presenting it in the present tense would overstate it (see windowCurrent).
+function officialWindowLine(label, w, now = Date.now()) {
+  return windowCurrent(w, now)
+    ? `${label}: ${w.usedPct}% used · resets ${fmtClock(w.resetAt)} · official`
+    : `${label}: ${w.usedPct}% used · window reset at ${fmtClock(w.resetAt)} · last known`;
+}
+
+// An official Codex window whose recorded resetAt has already passed describes a window
+// that no longer exists — OpenAI restarts the new one at 0%. Codex only writes logs while
+// it runs, so a machine that stopped using Codex keeps the last snapshot forever; without
+// this check a long-gone 92% would headline the menu bar indefinitely. A snapshot with no
+// resetAt can't be judged and is left alone. Mirrors Snapshot.codexWindowExpired in the app.
+function windowCurrent(w, now = Date.now()) {
+  if (!w) return false;
+  return w.resetAt == null || w.resetAt > now;
+}
+
+// Most-pressured-provider headline (design doc §6): only REAL, CURRENT percentages compete —
+// Codex's official used_percent while its window is still open, and Claude's % only when a
+// cap (TOKENTAB_WINDOW_CAP) makes agg.window.pct real. Inferred time-left never competes
+// with a quota-%. Returns {provider, pct} for whichever is more pressured, or null when
+// neither has a real one.
+function realPct(agg, now = Date.now()) {
   const candidates = [];
   if (agg.window && agg.window.pct != null) candidates.push({ provider: "claude", pct: agg.window.pct });
   const codexPrimary = agg.providers?.codex?.windows?.primary;
-  if (codexPrimary && codexPrimary.usedPct != null)
+  if (codexPrimary && codexPrimary.usedPct != null && windowCurrent(codexPrimary, now))
     candidates.push({ provider: "codex", pct: codexPrimary.usedPct });
   if (!candidates.length) return null;
   return candidates.reduce((best, c) => (c.pct > best.pct ? c : best));
 }
 
-function dominantSurface(bySurface) {
+// The displayed surface — and so whether the subscription 5h-window section shows at all.
+// Ranked over CLAUDE's records only (agg.providers.claude.bySurface): this decides a CLAUDE
+// mode, so a machine that runs more Codex than Claude must not suppress the Claude
+// subscription section. `codex` is excluded belt-and-braces for the legacy no-providers
+// shape. Mirrors Aggregate.dominantSurface in Core.swift.
+// The directories this run ACTUALLY walked, named exactly. A trust line is a claim about
+// what was opened, so it has to come from the resolved provider flags: with
+// TOKENTAB_PROVIDERS=codex the old wording still named ~/.claude, a directory never read.
+// (The both-false case exits earlier with the "no logs found" message.)
+function readsClause(enabled) {
+  if (enabled.claude && enabled.codex) return "~/.claude + ~/.codex";
+  return enabled.codex ? "~/.codex" : "~/.claude";
+}
+
+function dominantSurface(agg) {
+  const bySurface = agg.providers?.claude?.bySurface ?? agg.bySurface;
   let best = null,
     bestN = -1;
   for (const [s, n] of Object.entries(bySurface)) {
-    if (s !== "untracked" && n > bestN) {
+    if (s !== "untracked" && s !== "codex" && n > bestN) {
       best = s;
       bestN = n;
     }
@@ -256,12 +291,17 @@ async function main() {
   let codexMalformed = 0;
   let codexRateLimits = null;
   let codexRecords = [];
+  let codexFiles = [];
   if (enabled.codex) {
+    codexFiles = findCodexJsonl(codexRoot);
     const r = await readCodexUsage(codexRoot);
     codexRecords = r.records;
     codexMalformed = r.malformed;
     codexRateLimits = r.codexRateLimits;
   }
+  // Parse health counts every file we opened, per provider. A Codex-only run used to report
+  // "files: 0" while showing Codex usage — the diagnostic contradicting the numbers above it.
+  const totalFiles = files.length + codexFiles.length;
 
   const records = [...claudeRecords, ...codexRecords];
   const cap = Number(process.env.TOKENTAB_WINDOW_CAP);
@@ -289,18 +329,24 @@ async function main() {
   }
 
   if (mode === "json") {
-    // Default (flag unset) output stays byte-for-byte identical: `live` is only
-    // appended when present, never as `live: null`, and `window` is untouched.
-    // Malformed counts merge across providers — both are "tolerated, counted" the
-    // same way, so one combined figure is the honest parse-health number.
-    const out = { ...agg, files: files.length, parseErrors: parseErrors.length + codexMalformed };
+    // `live` is only appended when present, never as `live: null`, and `window` is untouched.
+    // Malformed counts merge across providers — both are "tolerated, counted" the same way,
+    // so one combined figure is the honest parse-health number. `files` likewise counts every
+    // file opened; `filesByProvider` keeps the split attributable (a Codex-only run reporting
+    // `files: 0` next to real Codex usage was the diagnostic contradicting itself).
+    const out = {
+      ...agg,
+      files: totalFiles,
+      filesByProvider: { claude: files.length, codex: codexFiles.length },
+      parseErrors: parseErrors.length + codexMalformed,
+    };
     if (live) out.live = live;
     console.log(JSON.stringify(out, null, 2));
     return;
   }
 
   const surfaceOverride = resolveSurfaceOverride(process.env);
-  const surface = surfaceOverride ?? dominantSurface(agg.bySurface);
+  const surface = surfaceOverride ?? dominantSurface(agg);
   const w = agg.window;
 
   if (mode === "swiftbar") {
@@ -311,10 +357,17 @@ async function main() {
     // at a glance. Inferred time-left never competes with a real %. Neither provider
     // has a real % (the common case: no TOKENTAB_WINDOW_CAP, Codex absent/disabled)
     // falls back to the current behavior: combined today tokens.
+    //
+    // Ranking is by % USED (higher = more pressure), but the label prints % LEFT — the
+    // native app's menu bar reads "% left" for both providers, and the same Mac must not
+    // get two contradictory numbers from two front-ends. Unlike the app, this label stays
+    // single-provider: its `◧` is one static character, so a second figure would have
+    // nothing to identify it (the app can only show both because it draws a colored ring
+    // per provider). See the 2026-07-30 rows in DESIGN.md.
     const pressure = realPct(agg);
     if (pressure) {
       const suffix = pressure.provider === "codex" ? " Cdx" : "";
-      console.log(`◧ ${pressure.pct}%${suffix}`);
+      console.log(`◧ ${100 - pressure.pct}%${suffix}`);
     } else {
       console.log(`◧ ${abbrev(agg.today)}`);
     }
@@ -362,17 +415,12 @@ async function main() {
       console.log("---");
       console.log("Codex —");
       const cw = codexP.windows || {};
-      if (cw.primary)
-        console.log(`  5h window: ${cw.primary.usedPct}% used · resets ${fmtClock(cw.primary.resetAt)} · official`);
-      if (cw.secondary)
-        console.log(`  This week: ${cw.secondary.usedPct}% used · resets ${fmtClock(cw.secondary.resetAt)} · official`);
+      if (cw.primary) console.log("  " + officialWindowLine("5h window", cw.primary));
+      if (cw.secondary) console.log("  " + officialWindowLine("This week", cw.secondary));
       console.log(`  Today: ${codexP.today.toLocaleString()} tokens | color=gray`);
     }
     console.log("---");
-    const trust = enabled.codex
-      ? "Local only · No network · reads ~/.claude + ~/.codex | color=gray"
-      : "Local only · No network · ~/.claude/projects read-only | color=gray";
-    console.log(trust);
+    console.log(`Local only · No network · ${readsClause(enabled)} read-only | color=gray`);
     return;
   }
 
@@ -451,10 +499,8 @@ async function main() {
       line(`    All time:  ${abbrev(pb.total).padStart(8)}   (${pb.total.toLocaleString()})`);
       line("");
       const cw = pb.windows || {};
-      if (cw.primary)
-        line(`    5h window: ${cw.primary.usedPct}% used · resets ${fmtClock(cw.primary.resetAt)} · official`);
-      if (cw.secondary)
-        line(`    This week: ${cw.secondary.usedPct}% used · resets ${fmtClock(cw.secondary.resetAt)} · official`);
+      if (cw.primary) line("    " + officialWindowLine("5h window", cw.primary));
+      if (cw.secondary) line("    " + officialWindowLine("This week", cw.secondary));
       if (pb.plan?.planType) line(`    Plan: ${pb.plan.planType}`);
       if (cw.primary || cw.secondary) line("");
       const codexModels = Object.entries(pb.byModel).sort((a, b) => b[1] - a[1]);
@@ -467,7 +513,10 @@ async function main() {
   }
 
   line("  Parse health " + "─".repeat(38));
-  line(`    files:                 ${files.length}`);
+  line(
+    `    files:                 ${totalFiles}` +
+      (enabled.claude && enabled.codex ? `   (claude ${files.length} · codex ${codexFiles.length})` : ""),
+  );
   line(`    usage records counted: ${agg.dedup.counted.toLocaleString()}`);
   line(`    duplicates dropped:    ${agg.dedup.duplicatesDropped.toLocaleString()}`);
   line(`    keep-last revisions (normal for streaming): ${agg.dedup.collisionsDifferingTotals}`);
@@ -475,11 +524,7 @@ async function main() {
   line(`    untracked: ${agg.untracked.requests} requests / ${abbrev(agg.untracked.tokens)} tokens`);
   line(`    malformed lines skipped: ${parseErrors.length + codexMalformed}`);
   line("");
-  line(
-    enabled.codex
-      ? "  0 network calls · reads ~/.claude + ~/.codex"
-      : "  0 network calls · reads ~/.claude",
-  );
+  line(`  0 network calls · reads ${readsClause(enabled)}`);
   line("");
 }
 

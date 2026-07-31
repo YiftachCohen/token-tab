@@ -1,6 +1,6 @@
 {
   "name": "codex mix: priced gpt-5.5 + unpriced codex-auto-review -> cost.total stays priced-only, unpriced bucket carries the rest",
-  "_comment": "End-to-end aggregate() exercise of design doc section 3's 'unpriced by design' list: codex-auto-review (and gpt-5.2-codex/gpt-5-codex, asserted absent from the rate table by the regression-guard test in rates-coverage.test.mjs) must never be guessed a price. future-dated so today/thisWeek/rolling5h stay 0 (TZ-independent, same trick as the other provider fixtures).",
+  "_comment": "End-to-end aggregate() exercise of design doc section 3's 'unpriced by design' list: codex-auto-review (and gpt-5.3-codex-spark/gpt-5.4-codex, asserted absent from the rate table by the regression-guard test in rates-coverage.test.mjs) has no published rate, so it must never be guessed one -- its tokens still count everywhere else. future-dated so today/thisWeek/rolling5h stay 0 (TZ-independent, same trick as the other provider fixtures).",
   "now": "2026-06-01T00:00:00Z",
   "cap": 0,
   "records": [
