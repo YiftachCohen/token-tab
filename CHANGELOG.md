@@ -9,6 +9,8 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-01
+
 ### Added
 - **Codex CLI usage, as a second provider.** Token Tab now also reads OpenAI Codex CLI
   rollout logs from `~/.codex/sessions` (and `archived_sessions/`), opt-in per provider
@@ -95,6 +97,30 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
   single-provider configuration could claim a directory the run never opened. Both now
   derive the wording from the resolved provider flags — and the native app honours
   `TOKENTAB_PROVIDERS` for Claude too, so the flag means the same thing in both front-ends.
+
+### Trust surface
+- **Changed: a second log directory is read.** `~/.codex/sessions` (and
+  `archived_sessions/`) joins `~/.claude/projects`, opt-in per provider in Settings ▸
+  Providers. In the sandboxed app it needs its own read-only grant of `~/.codex` — a
+  separate security-scoped bookmark, not a widening of the `~/.claude` one — held to the
+  same floor (the home folder and any ancestor are refused, and an over-broad bookmark
+  saved earlier is dropped and re-prompted).
+- **Changed: new parsed fields, in the new reader only.** Codex rollout lines are
+  dispatched on their top-level `type` off the raw string; only `event_msg`
+  (`token_count` usage totals and `rate_limits`), `turn_context` (`model`), and
+  `session_meta` (`id`) are decoded. `response_item` lines — the content-bearing ones —
+  are skipped *before* `JSON.parse`, so their payload is never decoded or allocated. The
+  Claude parser's field list is unchanged, and `message.content` is still never touched by
+  either.
+- **Unchanged: entitlements.** `app/Bundle/TokenTab.entitlements` is byte-identical to
+  0.2.0 — still `app-sandbox` + `files.user-selected.read-only`, still no network
+  entitlement. The bundled live helper's entitlements are unchanged too, and it remains
+  opt-in and `launchd`-only.
+- **Unchanged: network posture.** No network and no subprocess in `src/` or `app/Sources`;
+  nothing is written to either log directory. The new Codex reader adds no live path — its
+  percentages come from `rate_limits` already in the logs, not from a call.
+- **Rate table:** twelve OpenAI models priced (rates verified 2026-07-31), mirrored in both
+  engines. Ids with no published rate stay unpriced rather than costing $0.
 
 ## [0.2.0] — 2026-07-29
 
