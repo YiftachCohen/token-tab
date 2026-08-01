@@ -1,0 +1,50 @@
+{
+  "name": "codex resumed-session replay -> keep-last dedup counts replayed records once",
+  "_comment": "A resumed Codex session writes a NEW rollout file that replays the original's session_meta and token_count stream verbatim (observed on real logs, 2026-05-30 pair in archived_sessions). The reader therefore emits identical codex:<sessionId>/token:<seq> keys for the replayed events, and aggregate's keep-last dedup must collapse them -- this fixture pins that. Records 3-4 are byte-identical replays of 1-2 (same key, same usage); record 5 is genuinely new post-resume usage with the next seq. Future-dated so calendar windows are 0.",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "codex:sess-resume", "requestId": "token:0", "model": "gpt-5.5", "provider": "codex",
+      "usage": { "input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 50 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-resume", "requestId": "token:1", "model": "gpt-5.5", "provider": "codex",
+      "usage": { "input_tokens": 200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 20 },
+      "timestamp": "2026-06-20T12:05:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-resume", "requestId": "token:0", "model": "gpt-5.5", "provider": "codex",
+      "usage": { "input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 50 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-resume", "requestId": "token:1", "model": "gpt-5.5", "provider": "codex",
+      "usage": { "input_tokens": 200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 20 },
+      "timestamp": "2026-06-20T12:05:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-resume", "requestId": "token:2", "model": "gpt-5.5", "provider": "codex",
+      "usage": { "input_tokens": 50, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 10 },
+      "timestamp": "2026-06-20T12:10:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 430,
+    "today": 0,
+    "thisWeek": 0,
+    "rolling5h": 0,
+    "byClass": { "input": 350, "cacheCreate": 0, "cacheRead": 0, "output": 80 },
+    "bySurface": { "codex": 430 },
+    "byModel": { "gpt-5.5": 430 },
+    "providerOrder": ["codex"],
+    "providers": {
+      "codex": { "total": 430, "today": 0, "byClass": { "input": 350, "output": 80 } }
+    },
+    "cost": {
+      "total": 0.00415,
+      "byModel": { "gpt-5.5": 0.00415 }
+    }
+  }
+}

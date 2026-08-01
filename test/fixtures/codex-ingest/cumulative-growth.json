@@ -1,0 +1,16 @@
+{
+  "desc": "Happy path: cumulative totals grow monotonically; deltas fold to per-call usage.",
+  "fileName": "rollout-2026-06-20T13-14-52-019ee4bd-9e44-7b83-bbc1-de29b2cad406.jsonl",
+  "lines": [
+    { "type": "session_meta", "timestamp": "2026-06-20T13:14:52.000Z", "payload": { "id": "019ee4bd-9e44-7b83-bbc1-de29b2cad406" } },
+    { "type": "turn_context", "payload": { "model": "gpt-5.4" } },
+    { "type": "event_msg", "timestamp": "2026-06-20T13:15:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 100, "cached_input_tokens": 40, "output_tokens": 20, "total_tokens": 120 } }, "rate_limits": null } },
+    { "type": "event_msg", "timestamp": "2026-06-20T13:16:00.000Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 250, "cached_input_tokens": 90, "output_tokens": 60, "total_tokens": 310 } }, "rate_limits": null } }
+  ],
+  "expected": [
+    { "messageId": "codex:019ee4bd-9e44-7b83-bbc1-de29b2cad406", "requestId": "token:0", "model": "gpt-5.4", "usage": { "input_tokens": 60, "cache_read_input_tokens": 40, "cache_creation_input_tokens": 0, "output_tokens": 20 }, "timestamp": "2026-06-20T13:15:00.000Z", "provider": "codex", "isSidechain": false },
+    { "messageId": "codex:019ee4bd-9e44-7b83-bbc1-de29b2cad406", "requestId": "token:1", "model": "gpt-5.4", "usage": { "input_tokens": 100, "cache_read_input_tokens": 50, "cache_creation_input_tokens": 0, "output_tokens": 40 }, "timestamp": "2026-06-20T13:16:00.000Z", "provider": "codex", "isSidechain": false }
+  ],
+  "malformed": 0,
+  "rateLimits": null
+}

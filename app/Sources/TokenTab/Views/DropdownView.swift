@@ -74,7 +74,7 @@ struct DropdownView: View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             VStack(spacing: 0) {
                 if showSettings {
-                    SettingsView(store: store, helper: helper, now: ctx.date) { showSettings = false }
+                    SettingsView(store: store, access: access, helper: helper, now: ctx.date) { showSettings = false }
                 } else {
                     // Shared header + tabs; only the body below the switcher swaps.
                     PanelHeader(pill: headerPill(now: ctx.date))
@@ -87,38 +87,76 @@ struct DropdownView: View {
         }
     }
 
-    /// The active tab's body — the mode-specific Overview panel, or the History chart.
+    /// The active tab's body — the focused provider's Overview panel (Claude runway/burn or the
+    /// Codex official gauge), the OTHER provider as a compact secondary hairline row below it
+    /// (hidden at zero usage; tapping it swaps focus), or the History chart.
     @ViewBuilder private func tabBody(now: Date) -> some View {
         switch tab {
         case .overview:
-            switch store.snapshot.mode {
-            case .subscription: SubscriptionPanel(store: store, helper: helper, now: now)
-            case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric, now: now)
+            let focused = store.focused(now: now)
+            VStack(spacing: 0) {
+                switch focused {
+                case .codex:
+                    CodexPanel(store: store, now: now)
+                case .claude:
+                    switch store.snapshot.mode {
+                    case .subscription: SubscriptionPanel(store: store, helper: helper, now: now)
+                    case .burn:         BurnPanel(snapshot: store.snapshot, menuMetric: $store.menuMetric, now: now)
+                    }
+                }
+                secondaryRow(focused: focused, now: now)
             }
         case .history:
-            HistoryPanel(snapshot: store.snapshot, mode: store.snapshot.mode)
+            HistoryPanel(snapshot: store.snapshot, focused: store.focused(now: now), mode: store.snapshot.mode)
         }
     }
 
-    /// The header badge, hoisted out of the panels so it's shared across tabs: a pulsing LIVE
-    /// dot + CLAUDE MAX on a subscription (the dot means "this % is authoritative"), or the
-    /// BEDROCK/API pill on pay-per-token.
-    @ViewBuilder private func headerPill(now: Date) -> some View {
-        switch store.snapshot.mode {
-        case .subscription:
-            HStack(spacing: 7) {
-                if store.snapshot.quotaLeft(now: now)?.source == "live" {
-                    HStack(spacing: 4) {
-                        GlowDot(color: Theme.green, size: 5, glow: 3)
-                        Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)
-                            .foregroundStyle(Theme.green)
-                    }
-                }
-                Pill(text: "CLAUDE MAX", tint: Theme.green)
+    /// The OTHER provider's compact row, shown only when it has usage. Codex is the "other"
+    /// when Claude is focused (and vice versa). Tapping sets an explicit focus in the store.
+    @ViewBuilder private func secondaryRow(focused: Provider, now: Date) -> some View {
+        let other: Provider = focused == .claude ? .codex : .claude
+        let show = other == .codex ? store.snapshot.codexHasUsage : store.snapshot.claudeHasUsage
+        if show {
+            Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 4)
+            SecondaryProviderRow(provider: other, snapshot: store.snapshot, now: now) {
+                withAnimation(.easeOut(duration: 0.15)) { store.userFocus = other }
             }
-        case .burn:
-            Pill(text: store.snapshot.surface == .bedrock ? "BEDROCK" : "API", tint: Theme.amber)
+            .padding(.horizontal, 5)
         }
+    }
+
+    /// The header badge, hoisted out of the panels so it's shared across tabs. When Codex is
+    /// the focused provider it gets its own indigo pill (with the plan, e.g. CODEX · PLUS);
+    /// otherwise it's the Claude pill: a pulsing LIVE dot + CLAUDE MAX on a subscription (the
+    /// dot means "this % is authoritative"), or the BEDROCK/API pill on pay-per-token.
+    @ViewBuilder private func headerPill(now: Date) -> some View {
+        if store.focused(now: now) == .codex {
+            Pill(text: codexPillText, tint: Theme.indigo)
+        } else {
+            switch store.snapshot.mode {
+            case .subscription:
+                HStack(spacing: 7) {
+                    if store.snapshot.quotaLeft(now: now)?.source == "live" {
+                        HStack(spacing: 4) {
+                            GlowDot(color: Theme.green, size: 5, glow: 3)
+                            Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)
+                                .foregroundStyle(Theme.green)
+                        }
+                    }
+                    Pill(text: "CLAUDE MAX", tint: Theme.green)
+                }
+            case .burn:
+                Pill(text: store.snapshot.surface == .bedrock ? "BEDROCK" : "API", tint: Theme.amber)
+            }
+        }
+    }
+
+    /// "CODEX" or "CODEX · PLUS" — the plan is formatting-only metadata from the snapshot.
+    private var codexPillText: String {
+        if let plan = store.snapshot.codexPlan, !plan.isEmpty {
+            return "CODEX · \(plan.uppercased())"
+        }
+        return "CODEX"
     }
 
     /// Shared footer: the mode/tab-specific trust line on the left, actions on the right (one
@@ -146,7 +184,7 @@ struct DropdownView: View {
             .padding(.horizontal, 15).padding(.vertical, 9)
             .background(Theme.subtleFill)
             Text(store.hasLoadedOnce
-                 ? "updated \(updatedAgo(store.snapshot.lastUpdated)) · \(store.snapshot.fileCount) files"
+                 ? "updated \(updatedAgo(store.snapshot.lastUpdated)) · \(store.snapshot.totalFileCount) files"
                  : "loading…")
                 .font(.system(size: 9.5)).foregroundStyle(Theme.faint)
                 .frame(maxWidth: .infinity)
@@ -154,13 +192,34 @@ struct DropdownView: View {
         }
     }
 
-    /// The mode/tab-specific trust line: subscription is local-only, Bedrock/API states the
-    /// price-table read, History is computed on-device.
+    /// The directories the LAST REFRESH actually opened, named exactly. This is a trust claim,
+    /// so it's derived from the store's resolved provider flags (dir present + TOKENTAB_PROVIDERS
+    /// + the Codex toggle) rather than re-guessed here: a `TOKENTAB_PROVIDERS=codex` Mac must not
+    /// be told this app read ~/.claude. Empty only in the (unreachable) both-off case, where the
+    /// generic line below stands in.
+    private var readsClause: String {
+        switch (store.claudeActive, store.codexActive) {
+        case (true, true):   return "reads ~/.claude + ~/.codex"
+        case (true, false):  return "reads ~/.claude"
+        case (false, true):  return "reads ~/.codex"
+        case (false, false): return ""
+        }
+    }
+
+    /// The mode/tab-specific trust line, naming whichever directories were actually read.
     private var trustText: String {
-        if tab == .history { return "Computed on-device · 0 network calls" }
-        return store.snapshot.mode == .burn
-            ? "0 network calls · reads ~/.claude"
-            : "Local only — nothing leaves this Mac"
+        let reads = readsClause
+        if reads.isEmpty {
+            return tab == .history ? "Computed on-device · 0 network calls"
+                                   : "Local only — nothing leaves this Mac"
+        }
+        if tab == .history { return "Computed on-device · \(reads)" }
+        // The subscription Overview keeps its warmer line when Claude is the only source —
+        // that wording predates providers and is what the design specifies for that panel.
+        if store.snapshot.mode != .burn && !store.codexActive {
+            return "Local only — nothing leaves this Mac"
+        }
+        return "0 network calls · \(reads)"
     }
 
     private var loading: some View { LoadingView() }

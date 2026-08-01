@@ -25,15 +25,19 @@ public struct UsageRecord: Sendable, Codable {
     public var usage: TokenUsage
     public var timestamp: Date?
     public var isSidechain: Bool
+    /// Optional; absent (nil) means "claude" — old cached/fixture records with no
+    /// provider field aggregate exactly as before.
+    public var provider: String?
 
     public init(messageId: String?, requestId: String?, model: String,
-                usage: TokenUsage, timestamp: Date?, isSidechain: Bool) {
+                usage: TokenUsage, timestamp: Date?, isSidechain: Bool, provider: String? = nil) {
         self.messageId = messageId
         self.requestId = requestId
         self.model = model
         self.usage = usage
         self.timestamp = timestamp
         self.isSidechain = isSidechain
+        self.provider = provider
     }
 }
 
@@ -62,6 +66,7 @@ public enum Surface: String, Sendable {
     case subscription
     case bedrock
     case untracked
+    case codex
 }
 
 /// Resolve the surface the UI should display, by precedence:
@@ -91,10 +96,12 @@ public enum ModelUtil {
     }
 
     /// Route a model id to a billing surface — the signal that decides the app's MODE.
+    ///  codex:        provider == "codex" (Claude routing below is untouched otherwise)
     ///  bedrock:      us.anthropic.* / anthropic.*
     ///  subscription: claude-* and bare names (sonnet/opus/haiku)
     ///  untracked:    <synthetic>/<unknown> and anything unrecognised (still counted)
-    public static func classifySurface(_ model: String) -> Surface {
+    public static func classifySurface(_ model: String, provider: String? = nil) -> Surface {
+        if provider == "codex" { return .codex }
         let base = normalize(model).base
         if base.isEmpty || base == "<synthetic>" || base == "<unknown>" { return .untracked }
         // Bedrock ids carry an optional region prefix (us./eu./apac./us-gov.) before
@@ -226,7 +233,110 @@ public struct CostSummary: Sendable {
     public var unpricedModels: [String] = []
 }
 
+// MARK: - Provider subtotals (schemaVersion 2 — mirrors core.mjs `providers` block)
+
+/// One provider's window, tagged with where the % comes from. Claude's is derived
+/// from the inferred 5h block (`source: "inferred"`); Codex's is formatted from an
+/// official out-of-band snapshot (`source: "official"`) — never computed from records.
+/// `cap`/`calibratedCap` are meaningless for an official % and stay nil for Codex.
+public struct ProviderWindow: Sendable {
+    public var source: String              // "inferred" | "official"
+    public var period: String              // "5h" | "weekly"
+    public var active: Bool?               // inferred windows only
+    public var tokens: Int?                // inferred windows only
+    public var resetAt: Date?
+    public var cap: Int?
+    public var calibratedCap: Int?
+    public var usedPct: Double?            // official windows only
+    public var windowMinutes: Int?         // official windows only
+
+    public init(source: String, period: String, active: Bool? = nil, tokens: Int? = nil,
+                resetAt: Date? = nil, cap: Int? = nil, calibratedCap: Int? = nil,
+                usedPct: Double? = nil, windowMinutes: Int? = nil) {
+        self.source = source
+        self.period = period
+        self.active = active
+        self.tokens = tokens
+        self.resetAt = resetAt
+        self.cap = cap
+        self.calibratedCap = calibratedCap
+        self.usedPct = usedPct
+        self.windowMinutes = windowMinutes
+    }
+}
+
+/// Codex plan metadata (formatting only — never a token/dollar source).
+public struct CodexPlan: Sendable {
+    public var planType: String?
+    public var asOf: Date?
+
+    public init(planType: String? = nil, asOf: Date? = nil) {
+        self.planType = planType
+        self.asOf = asOf
+    }
+}
+
+/// Dollars scoped to one provider (mirrors `providers.<p>.cost` in core.mjs). The combined
+/// `CostSummary` is every provider's spend added together; a UI that labels a figure with a
+/// provider's name needs that provider's own, or one priced Codex record inflates what is
+/// presented as Claude's cost. Present only when a cost model was injected.
+public struct ProviderCost: Sendable {
+    public var total: Double = 0
+    public var today: Double = 0
+    public var thisWeek: Double = 0
+    public var rolling5h: Double = 0
+
+    public init() {}
+}
+
+/// Per-provider subtotal — the same shape the combined `Aggregate` carries, scoped to
+/// one provider's records (see core.mjs `providerBucket`). Only providers actually
+/// present in the input records get an entry.
+public struct ProviderSubtotal: Sendable {
+    public var today = 0
+    public var total = 0
+    public var thisWeek = 0
+    public var rolling5h = 0
+    public var byClass = TokenUsage()
+    public var byModel: [String: Int] = [:]
+    public var bySurface: [Surface: Int] = [:]
+    public var cost: ProviderCost?
+    public var windows: [String: ProviderWindow] = [:]   // "primary" / "secondary"
+    public var plan: CodexPlan?
+
+    public init() {}
+}
+
+/// Out-of-band official Codex rate-limit snapshot (the newest `token_count.payload.rate_limits`
+/// across all Codex log files). Formatting-only input to `aggregate()` — it is never summed;
+/// Phase 1 has no Codex reader, so callers construct this by hand until Phase 3/4 land.
+public struct CodexRateLimitsSnapshot: Sendable {
+    public struct Window: Sendable {
+        public var usedPercent: Double
+        public var resetsAt: Date?
+        public var windowMinutes: Int?
+        public init(usedPercent: Double, resetsAt: Date? = nil, windowMinutes: Int? = nil) {
+            self.usedPercent = usedPercent
+            self.resetsAt = resetsAt
+            self.windowMinutes = windowMinutes
+        }
+    }
+    public var primary: Window?
+    public var secondary: Window?
+    public var planType: String?
+    public var asOf: Date?
+
+    public init(primary: Window? = nil, secondary: Window? = nil,
+                planType: String? = nil, asOf: Date? = nil) {
+        self.primary = primary
+        self.secondary = secondary
+        self.planType = planType
+        self.asOf = asOf
+    }
+}
+
 public struct Aggregate: Sendable {
+    public var schemaVersion = 2
     public var total = 0
     public var today = 0
     public var thisWeek = 0
@@ -243,15 +353,24 @@ public struct Aggregate: Sendable {
     public var counted = 0
     public var duplicatesDropped = 0
     public var approximate = false
+    public var providerOrder: [String] = []
+    public var providers: [String: ProviderSubtotal] = [:]
 
     public init() {}
 
-    /// Dominant non-untracked surface → the app's MODE. Mixed machines fall back to
-    /// the larger surface (the dropdown still shows the per-surface breakdown).
+    /// Dominant non-untracked surface → the app's MODE. Mixed machines fall back to the
+    /// larger surface (the dropdown still shows the per-surface breakdown).
+    ///
+    /// Ranked over CLAUDE's records only. The mode this feeds is Claude's — subscription
+    /// runway vs pay-per-token burn — so a machine that happens to run more Codex than
+    /// Claude must not flip the Claude panel into burn mode (and the CLI must not suppress
+    /// its Claude subscription section). `.codex` is excluded belt-and-braces for a legacy
+    /// aggregate that has no per-provider subtotals. Mirrors dominantSurface() in token-tab.mjs.
     public var dominantSurface: Surface {
+        let source = providers["claude"]?.bySurface ?? bySurface
         var best: Surface = .untracked
         var bestN = -1
-        for (s, n) in bySurface where s != .untracked && n > bestN {
+        for (s, n) in source where s != .untracked && s != .codex && n > bestN {
             best = s; bestN = n
         }
         return best
@@ -285,7 +404,17 @@ public struct DayUsage: Sendable {
 public protocol CostModel: Sendable {
     /// Returns (usd, priced). priced == false means "no rate for this model" — the
     /// caller still counts the tokens, it just lands in the unpriced bucket.
-    func cost(_ usage: TokenUsage, model: String) -> (usd: Double, priced: Bool)
+    /// `provider` selects the rate table + cache multipliers (default "claude", matching
+    /// aggregate()'s "absent provider ⇒ claude" convention).
+    func cost(_ usage: TokenUsage, model: String, provider: String) -> (usd: Double, priced: Bool)
+}
+
+public extension CostModel {
+    /// Default-provider convenience overload, so existing Claude-only call sites
+    /// (and tests) that never pass `provider` keep compiling unchanged.
+    func cost(_ usage: TokenUsage, model: String) -> (usd: Double, priced: Bool) {
+        cost(usage, model: model, provider: "claude")
+    }
 }
 
 // MARK: - Calendar helpers (LOCAL time — logs are UTC, "today" must mean the user's day)
@@ -310,11 +439,16 @@ public struct AggregateOptions: Sendable {
     public var weekStartsOn: Int      // 0 = Sunday, 1 = Monday
     public var blockHours: Double
     public var cap: Int               // 0 = none
-    public init(now: Date = Date(), weekStartsOn: Int = 1, blockHours: Double = 5, cap: Int = 0) {
+    /// Out-of-band official Codex snapshot (see CodexRateLimitsSnapshot). Formatting only —
+    /// never summed into any total. nil when no Codex rate-limits reading is available.
+    public var codexRateLimits: CodexRateLimitsSnapshot?
+    public init(now: Date = Date(), weekStartsOn: Int = 1, blockHours: Double = 5, cap: Int = 0,
+                codexRateLimits: CodexRateLimitsSnapshot? = nil) {
         self.now = now
         self.weekStartsOn = weekStartsOn
         self.blockHours = blockHours
         self.cap = cap
+        self.codexRateLimits = codexRateLimits
     }
 }
 
@@ -363,13 +497,23 @@ public func aggregate(_ records: [UsageRecord],
         kept[key] = r // last-write-wins
     }
 
-    // Pass 2 — aggregate the deduped records.
+    // Pass 2 — aggregate the deduped records. Combined (all-provider) totals AND
+    // per-provider subtotals accumulate side by side, so a Claude-only input produces
+    // byte-identical combined output to before providers existed (the "claude" bucket
+    // just mirrors the combined one).
     var agg = Aggregate()
     agg.window.blockSeconds = options.blockHours * 3600
     var costSummary = CostSummary()
     var unpricedModels = Set<String>()
+    // Window-block inputs: past-dated CLAUDE records only. The inferred 5h block is
+    // Anthropic's rate-limit window; feeding another provider's timestamps into it would
+    // inflate Claude's window tokens (and its cap %) with usage Anthropic never billed —
+    // a Codex-heavy trace could read as 100% of the Claude cap. Each provider has its own
+    // window under providers.* (Codex's is official, never inferred). Mirrors core.mjs.
     var stamps: [(t: Double, sum: Int)] = []
     let haveCost = costModel != nil
+    var providerBuckets: [String: ProviderSubtotal] = [:]
+    var providerOrder: [String] = []
 
     for key in order {
         guard let r = kept[key] else { continue }
@@ -381,18 +525,36 @@ public func aggregate(_ records: [UsageRecord],
         agg.byClass.cacheRead += r.usage.cacheRead
         agg.byClass.output += r.usage.output
 
-        let surface = ModelUtil.classifySurface(r.model)
+        let provider = r.provider ?? "claude"
+        if providerBuckets[provider] == nil {
+            var b = ProviderSubtotal()
+            // Mirrors the top-level rule: the cost block exists only when a cost model
+            // was injected, so a costless aggregate carries no zero-dollar figures.
+            if haveCost { b.cost = ProviderCost() }
+            providerBuckets[provider] = b
+            providerOrder.append(provider)
+        }
+
+        let surface = ModelUtil.classifySurface(r.model, provider: provider)
         agg.bySurface[surface, default: 0] += sum
+        providerBuckets[provider]!.bySurface[surface, default: 0] += sum
         let base = ModelUtil.normalize(r.model).base
         agg.byModel[base, default: 0] += sum
+        providerBuckets[provider]!.byModel[base, default: 0] += sum
+        providerBuckets[provider]!.total += sum
+        providerBuckets[provider]!.byClass.input += r.usage.input
+        providerBuckets[provider]!.byClass.cacheCreate += r.usage.cacheCreate
+        providerBuckets[provider]!.byClass.cacheRead += r.usage.cacheRead
+        providerBuckets[provider]!.byClass.output += r.usage.output
 
         var usd = 0.0
         var priced = false
         if let cm = costModel {
-            let c = cm.cost(r.usage, model: r.model)
+            let c = cm.cost(r.usage, model: r.model, provider: provider)
             usd = c.usd; priced = c.priced
             if priced {
                 costSummary.total += usd
+                providerBuckets[provider]!.cost?.total += usd
                 costSummary.byModel[base, default: 0] += usd
             } else {
                 costSummary.unpricedTokens += sum
@@ -418,25 +580,36 @@ public func aggregate(_ records: [UsageRecord],
                 let dayKey = localDayKey(ts, cal)
                 if dayKey == todayKey {
                     agg.today += sum
+                    providerBuckets[provider]!.today += sum
                     if r.isSidechain { agg.todaySplit.subTokens += sum; agg.todaySplit.subCost += priced ? usd : 0 }
                     else { agg.todaySplit.mainTokens += sum; agg.todaySplit.mainCost += priced ? usd : 0 }
                 }
-                if tms >= weekStart { agg.thisWeek += sum }
-                if tms > rollingCutoff { agg.rolling5h += sum }
+                if tms >= weekStart { agg.thisWeek += sum; providerBuckets[provider]!.thisWeek += sum }
+                if tms > rollingCutoff { agg.rolling5h += sum; providerBuckets[provider]!.rolling5h += sum }
                 if tms > hourCutoff { agg.lastHourTokens += sum }
                 if priced {
-                    if dayKey == todayKey { costSummary.today += usd }
-                    if tms >= weekStart { costSummary.thisWeek += usd }
-                    if tms > rollingCutoff { costSummary.rolling5h += usd }
+                    if dayKey == todayKey {
+                        costSummary.today += usd
+                        providerBuckets[provider]!.cost?.today += usd
+                    }
+                    if tms >= weekStart {
+                        costSummary.thisWeek += usd
+                        providerBuckets[provider]!.cost?.thisWeek += usd
+                    }
+                    if tms > rollingCutoff {
+                        costSummary.rolling5h += usd
+                        providerBuckets[provider]!.cost?.rolling5h += usd
+                    }
                     if tms > hourCutoff { costSummary.lastHour += usd }
                 }
-                stamps.append((tms, sum))
+                if provider == "claude" { stamps.append((tms, sum)) }
             }
         }
     }
 
-    // Pass 3 — current usage window (fixed blockHours reset blocks, anchored to the
-    // first message of the block — verified against Claude's /usage).
+    // Pass 3 — Claude's current usage window (fixed blockHours reset blocks, anchored to
+    // the first message of the block — verified against Claude's /usage), built from
+    // Claude records only (see `stamps` above).
     let blockSeconds = options.blockHours * 3600
     stamps.sort { $0.t < $1.t }
     struct Block { var start: Double; var lastT: Double; var tokens: Int }
@@ -468,6 +641,43 @@ public func aggregate(_ records: [UsageRecord],
         costSummary.unpricedModels = unpricedModels.sorted()
         agg.cost = costSummary
     }
+
+    // providers.<p>.windows (design doc section 4/5). Claude's primary window mirrors
+    // agg.window (computed above from Claude's records alone), tagged with source/period
+    // metadata.
+    if providerBuckets["claude"] != nil {
+        providerBuckets["claude"]!.windows["primary"] = ProviderWindow(
+            source: "inferred", period: "5h",
+            active: agg.window.active, tokens: agg.window.tokens, resetAt: agg.window.resetAt,
+            cap: agg.window.cap, calibratedCap: agg.window.calibratedCap)
+    }
+
+    // Codex's windows come entirely from an out-of-band official snapshot (never derived
+    // from records — OpenAI publishes the real percentage). Formatting only.
+    if let snap = options.codexRateLimits {
+        if providerBuckets["codex"] == nil {
+            var b = ProviderSubtotal()
+            if haveCost { b.cost = ProviderCost() }
+            providerBuckets["codex"] = b
+            providerOrder.append("codex")
+        }
+        if let p = snap.primary {
+            providerBuckets["codex"]!.windows["primary"] = ProviderWindow(
+                source: "official", period: "5h",
+                resetAt: p.resetsAt, cap: nil, calibratedCap: nil,
+                usedPct: p.usedPercent, windowMinutes: p.windowMinutes)
+        }
+        if let s = snap.secondary {
+            providerBuckets["codex"]!.windows["secondary"] = ProviderWindow(
+                source: "official", period: "weekly",
+                resetAt: s.resetsAt, cap: nil, calibratedCap: nil,
+                usedPct: s.usedPercent, windowMinutes: s.windowMinutes)
+        }
+        providerBuckets["codex"]!.plan = CodexPlan(planType: snap.planType, asOf: snap.asOf)
+    }
+
+    agg.providerOrder = providerOrder
+    agg.providers = providerBuckets
     return agg
 }
 
@@ -522,7 +732,7 @@ public func dailyHistory(_ records: [UsageRecord],
         tokensByDay[dk, default: 0] += sum
         tokModelByDay[dk, default: [:]][base, default: 0] += sum
         if let cm = costModel {
-            let c = cm.cost(r.usage, model: r.model)
+            let c = cm.cost(r.usage, model: r.model, provider: r.provider ?? "claude")
             if c.priced {
                 costByDay[dk, default: 0] += c.usd
                 costModelByDay[dk, default: [:]][base, default: 0] += c.usd

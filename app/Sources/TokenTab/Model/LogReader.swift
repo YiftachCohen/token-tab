@@ -150,22 +150,59 @@ enum LogReader {
 /// `@unchecked Sendable`: the only mutation site is `UsageStore.refresh()`, serialized by
 /// its `isRefreshing` guard, so `records(for:)` calls never overlap.
 final class RecordCache: @unchecked Sendable {
-    private struct Entry { let mtime: Date; let size: Int; let records: [UsageRecord]; let malformed: Int }
+    /// A per-file cache entry. `provider` distinguishes Claude vs Codex files so a mixed walk
+    /// stays correct; `rateLimits` is a Codex file's latest rate_limits snapshot (nil for Claude,
+    /// or for a Codex file with no snapshot) so an unchanged Codex file's snapshot survives without
+    /// re-parsing. Both are v2 additions — old (v1) entries lacked them, hence the version bump.
+    private struct Entry {
+        let mtime: Date; let size: Int; let records: [UsageRecord]; let malformed: Int
+        var provider: String = "claude"
+        var rateLimits: CodexRateLimitsSnapshot? = nil
+    }
     private var cache: [String: Entry] = [:]   // keyed by absolute file path
 
     /// Bump when the parse output shape changes, so an old build's cache is ignored, not trusted.
-    private static let version = 1
+    /// v2: entries gained `provider` + a per-file Codex rate_limits snapshot.
+    private static let version = 2
     private let storeURL: URL?
     private var hydrated = false
     private var dirty = false
     private var lastPersist = Date.distantPast
     private let persistInterval: TimeInterval = 30
 
-    /// On-disk shape. Path strings (not URLs) so key equality is exact across launches.
+    /// On-disk shape. Path strings (not URLs) so key equality is exact across launches. `provider`
+    /// and `rateLimits` default so a truncated/old row still decodes — but the version gate below
+    /// discards a v1 store outright (full re-parse), which is the real invalidation path.
     private struct PersistedEntry: Codable {
         var path: String; var mtime: Date; var size: Int; var records: [UsageRecord]; var malformed: Int
+        var provider: String = "claude"
+        var rateLimits: PersistedRateLimits? = nil
     }
     private struct PersistedCache: Codable { var version: Int; var entries: [PersistedEntry] }
+
+    /// Codable mirror of the Core CodexRateLimitsSnapshot (which is Sendable but not Codable, and
+    /// lives in a target we don't own), so a Codex file's official snapshot round-trips through the
+    /// on-disk cache. Kept in sync structurally with CodexRateLimitsSnapshot.
+    private struct PersistedRateLimits: Codable {
+        struct Window: Codable { var usedPercent: Double; var resetsAt: Date?; var windowMinutes: Int? }
+        var primary: Window?
+        var secondary: Window?
+        var planType: String?
+        var asOf: Date?
+
+        init(_ s: CodexRateLimitsSnapshot) {
+            func w(_ x: CodexRateLimitsSnapshot.Window?) -> Window? {
+                x.map { Window(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt, windowMinutes: $0.windowMinutes) }
+            }
+            primary = w(s.primary); secondary = w(s.secondary); planType = s.planType; asOf = s.asOf
+        }
+        func snapshot() -> CodexRateLimitsSnapshot {
+            func w(_ x: Window?) -> CodexRateLimitsSnapshot.Window? {
+                x.map { CodexRateLimitsSnapshot.Window(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt, windowMinutes: $0.windowMinutes) }
+            }
+            return CodexRateLimitsSnapshot(primary: w(primary), secondary: w(secondary), planType: planType, asOf: asOf)
+        }
+    }
 
     /// `storeURL == nil` disables persistence (the default — used by tests so they stay
     /// hermetic). The app passes `defaultStoreURL()` to get cross-launch reuse.
@@ -195,8 +232,10 @@ final class RecordCache: @unchecked Sendable {
             let mtime = vals?.contentModificationDate ?? .distantPast
             let size = vals?.fileSize ?? -1
             // Hit: file unchanged since we parsed it (logs are append-only, so mtime+size
-            // is a sound fingerprint). Reuse without touching disk.
-            if let e = cache[path], e.mtime == mtime, e.size == size {
+            // is a sound fingerprint). Reuse without touching disk. The provider guard
+            // mirrors the Codex branch — the roots are disjoint, but symmetry keeps a
+            // path collision from ever crossing providers.
+            if let e = cache[path], e.mtime == mtime, e.size == size, e.provider == "claude" {
                 records.append(contentsOf: e.records)
                 malformed += e.malformed
                 continue
@@ -207,12 +246,56 @@ final class RecordCache: @unchecked Sendable {
             records.append(contentsOf: r)
             malformed += m
         }
-        if cache.count > seen.count {           // drop vanished files so the cache stays bounded
-            cache = cache.filter { seen.contains($0.key) }
-            dirty = true
-        }
+        // Drop vanished CLAUDE files so the cache stays bounded — but leave Codex entries alone
+        // (they aren't in this walk's `seen` set; codexRecords prunes its own vanished files).
+        pruneVanished(seen: seen, provider: "claude")
         persistIfNeeded()
         return (records, malformed)
+    }
+
+    /// Remove cache entries for a given provider whose paths didn't appear in the latest walk.
+    /// Scoped by provider so the Claude and Codex refresh passes (which share this store) don't
+    /// evict each other's still-live files.
+    private func pruneVanished(seen: Set<String>, provider: String) {
+        let before = cache.count
+        cache = cache.filter { $0.value.provider != provider || seen.contains($0.key) }
+        if cache.count != before { dirty = true }
+    }
+
+    /// The Codex counterpart of `records(for:)`: re-parses only changed Codex files (mtime+size),
+    /// reusing cached records AND each file's rate_limits snapshot for the rest — so an unchanged
+    /// Codex file never re-reads even to refresh its official %. Records come back in `files` order
+    /// (deterministic fold), and `codexRateLimits` is the globally latest snapshot by asOf. Shares
+    /// the same on-disk store as the Claude path; the per-entry `provider` keeps the two apart.
+    func codexRecords(for files: [URL]) -> (records: [UsageRecord], malformed: Int, codexRateLimits: CodexRateLimitsSnapshot?) {
+        hydrateIfNeeded()
+        var records: [UsageRecord] = []
+        var malformed = 0
+        var latest: CodexRateLimitsSnapshot? = nil
+        var seen = Set<String>(minimumCapacity: files.count)
+        for url in files {
+            let path = url.path
+            seen.insert(path)
+            let vals = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let mtime = vals?.contentModificationDate ?? .distantPast
+            let size = vals?.fileSize ?? -1
+            if let e = cache[path], e.mtime == mtime, e.size == size, e.provider == "codex" {
+                records.append(contentsOf: e.records)
+                malformed += e.malformed
+                if let rl = e.rateLimits { latest = CodexLogReader.pickLatest(latest, rl) }
+                continue
+            }
+            let r = CodexLogReader.parseFile(url)
+            cache[path] = Entry(mtime: mtime, size: size, records: r.records, malformed: r.malformed,
+                                provider: "codex", rateLimits: r.rateLimits)
+            dirty = true
+            records.append(contentsOf: r.records)
+            malformed += r.malformed
+            if let rl = r.rateLimits { latest = CodexLogReader.pickLatest(latest, rl) }
+        }
+        pruneVanished(seen: seen, provider: "codex")
+        persistIfNeeded()
+        return (records, malformed, latest)
     }
 
     /// Load the persisted cache once, before the first parse. A missing/corrupt/old-version
@@ -225,7 +308,8 @@ final class RecordCache: @unchecked Sendable {
               let decoded = try? JSONDecoder().decode(PersistedCache.self, from: data),
               decoded.version == Self.version else { return }
         for e in decoded.entries {
-            cache[e.path] = Entry(mtime: e.mtime, size: e.size, records: e.records, malformed: e.malformed)
+            cache[e.path] = Entry(mtime: e.mtime, size: e.size, records: e.records, malformed: e.malformed,
+                                  provider: e.provider, rateLimits: e.rateLimits?.snapshot())
         }
     }
 
@@ -238,7 +322,8 @@ final class RecordCache: @unchecked Sendable {
         dirty = false
         let entries = cache.map { PersistedEntry(path: $0.key, mtime: $0.value.mtime,
                                                  size: $0.value.size, records: $0.value.records,
-                                                 malformed: $0.value.malformed) }
+                                                 malformed: $0.value.malformed, provider: $0.value.provider,
+                                                 rateLimits: $0.value.rateLimits.map(PersistedRateLimits.init)) }
         guard let data = try? JSONEncoder().encode(PersistedCache(version: Self.version, entries: entries)) else { return }
         try? data.write(to: url, options: .atomic)
     }

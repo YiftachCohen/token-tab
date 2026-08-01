@@ -84,6 +84,28 @@ enum Config {
         return nil
     }
 
+    /// The providers to ingest, from TOKENTAB_PROVIDERS (comma list, `all` accepted). Returns
+    /// nil for "no explicit setting" so the caller can default to "every provider whose dir
+    /// exists" (a missing dir is silently skipped, never an error — mirrors the JS engine).
+    /// Unknown tokens are ignored; an empty/whitespace value is treated as unset.
+    static func providers() -> Set<String>? {
+        guard let raw = string("TOKENTAB_PROVIDERS")?.trimmingCharacters(in: .whitespaces),
+              !raw.isEmpty else { return nil }
+        let parts = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        if parts.contains("all") { return nil }   // "all" == default (no gating)
+        let set = Set(parts.filter { !$0.isEmpty })
+        return set.isEmpty ? nil : set
+    }
+
+    /// Whether a given provider is enabled. `dirExists` gates the default case: with no explicit
+    /// TOKENTAB_PROVIDERS, a provider is on iff its log dir exists (silently off otherwise).
+    /// An explicit list turns a provider on regardless of dir existence (the reader then just
+    /// finds no files) — the whitelist is intent, not a filesystem probe.
+    static func providerEnabled(_ name: String, dirExists: Bool) -> Bool {
+        if let allow = providers() { return allow.contains(name.lowercased()) }
+        return dirExists
+    }
+
     /// Force the pay-per-token (Bedrock) panel when Claude Code's CLAUDE_CODE_USE_BEDROCK
     /// flag is truthy. Bedrock can't be told apart from a subscription by the logs alone —
     /// on Bedrock, Claude Code writes bare `claude-*` model ids that classifySurface reads

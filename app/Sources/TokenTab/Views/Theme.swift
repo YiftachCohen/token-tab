@@ -11,7 +11,11 @@ import AppKit
 enum Theme {
     // Brand accents (brighter in dark, per the design's light/dark pairs).
     static let green  = dynamic(light: 0x2E9E63, dark: 0x36C98A)
-    static let indigo = dynamic(light: 0x5B62D6, dark: 0x7C83F0)   // Codex
+    /// Codex's accent (DESIGN.md: indigo = Codex). The light/dark pair is also exposed raw
+    /// because Canvas draws with concrete colors — a dynamic color won't resolve inside it,
+    /// so the History chart picks the scheme itself (see HistoryPanel.solid).
+    static let indigoPair = (light: 0x5B62D6, dark: 0x7C83F0)
+    static let indigo = dynamic(light: indigoPair.light, dark: indigoPair.dark)
     // Brighter than the old brown amber so "the meter is running" reads as cost energy
     // (design refinement, 2026-06-30) — still short of neon.
     static let amber  = dynamic(light: 0xC2740F, dark: 0xF5B44D)
@@ -27,6 +31,10 @@ enum Theme {
     static let muted = dynamic(light: 0x76736D, dark: 0x9AA1B1)
     static let faint = dynamic(light: 0xA29E97, dark: 0x73798A)
     static let onAccent = Color(hex8: 0x0C0E13)   // dark text that reads on a green fill in either mode
+    /// Menu-bar figures while the dropdown is open: the status item paints the system selection
+    /// fill behind the label, and AppKit auto-inverts only a plain template image — a hosted
+    /// SwiftUI label has to say so itself, or it stays dark on the accent.
+    static let onMenuSelection = Color.white
 
     // Structure.
     static let track      = Color.primary.opacity(0.08)

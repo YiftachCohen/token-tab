@@ -37,10 +37,12 @@ export function normalizeModel(model) {
 }
 
 /** Route a model id to a billing surface.
+ *  codex:        provider === "codex" (Claude routing below is untouched otherwise)
  *  bedrock:      us.anthropic.* / anthropic.*:0
  *  subscription: claude-* and bare names (sonnet/opus/haiku)
  *  untracked:    <synthetic> and anything unrecognized (still counted for tokens) */
-export function classifySurface(model) {
+export function classifySurface(model, provider) {
+  if (provider === "codex") return "codex";
   const { base } = normalizeModel(model);
   if (!base || base === "<synthetic>" || base === "<unknown>") return "untracked";
   // Bedrock ids carry an optional region prefix (us./eu./apac./us-gov.) before
@@ -73,11 +75,19 @@ function startOfLocalWeek(now, weekStartsOn /* 0=Sun,1=Mon */) {
 /**
  * Aggregate a stream of assistant usage records.
  *
- * @param {Iterable<{messageId?:string,requestId?:string,model:string,usage:object,timestamp:string,isSidechain?:boolean}>} records
- * @param {{now?:Date, weekStartsOn?:number, cost?:(usage:object,model:string)=>{usd:number,priced:boolean}}} opts
- *   opts.cost (optional): a pure pricing function (see src/pricing.mjs). When supplied,
- *   the result carries a `cost` block (dollars per window + per model). Omit it and the
- *   output is byte-for-byte unchanged — the dollars layer never alters the token numbers.
+ * @param {Iterable<{messageId?:string,requestId?:string,model:string,usage:object,timestamp:string,isSidechain?:boolean,provider?:string}>} records
+ *   `provider` is optional and defaults to "claude" (absent ⇒ "claude", so old fixtures/
+ *   caches with no provider field aggregate exactly as before).
+ * @param {{now?:Date, weekStartsOn?:number, cost?:(usage:object,model:string,provider?:string)=>{usd:number,priced:boolean}, codexRateLimits?:object}} opts
+ *   opts.cost (optional): a pure pricing function (see src/pricing.mjs). Called with the
+ *   record's provider (default "claude") so it can select the right rate table + cache
+ *   multipliers. When supplied, the result carries a `cost` block (dollars per window +
+ *   per model). Omit it and the output is byte-for-byte unchanged — the dollars layer
+ *   never alters the token numbers.
+ *   opts.codexRateLimits (optional): out-of-band official snapshot
+ *   `{primary:{used_percent,resets_at,window_minutes}, secondary:{...}, plan_type, asOf}`
+ *   from the newest Codex `token_count` event. Formatted into `providers.codex.windows`
+ *   and `providers.codex.plan` — never summed into any token/dollar total.
  * @returns aggregate snapshot (plain value object — no content, no PII)
  */
 export function aggregate(records, opts = {}) {
@@ -112,7 +122,10 @@ export function aggregate(records, opts = {}) {
     kept.set(key, r); // last-write-wins (records arrive in deterministic file-mtime+line order)
   }
 
-  // Pass 2 — aggregate the deduped records.
+  // Pass 2 — aggregate the deduped records. Combined (all-provider) totals AND
+  // per-provider subtotals are accumulated side-by-side in the same loop so a
+  // Claude-only input produces byte-identical combined output to before providers
+  // existed (the per-provider bucket for "claude" just mirrors the combined one).
   const byClass = { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 };
   const bySurface = {}; // surface -> tokens
   const byModel = {}; // base model -> tokens
@@ -134,7 +147,39 @@ export function aggregate(records, opts = {}) {
   let unpricedTokens = 0;
   let unpricedRequests = 0;
   const unpricedModels = new Set();
-  const stamps = []; // {t, sum} for the window pass (past-dated only)
+  // {t, sum} for the window pass (past-dated CLAUDE records only). The inferred 5h
+  // block is Anthropic's rate-limit window: feeding another provider's timestamps into
+  // it would inflate Claude's window tokens (and its cap %) with usage Anthropic never
+  // billed — a Codex-heavy trace could read as 100% of the Claude cap. See providers.*
+  // for each provider's own window (Codex's is official, never inferred).
+  const stamps = [];
+
+  // Per-provider subtotals (providers.<p>.*) — only the fields the spec's schema
+  // needs (today/total/thisWeek/rolling5h/byClass/byModel/bySurface). One bucket
+  // per provider seen, created lazily so absent providers never appear in output.
+  const providerOrder = []; // first-seen order
+  const providerBuckets = new Map(); // provider -> bucket
+  function providerBucket(p) {
+    let b = providerBuckets.get(p);
+    if (!b) {
+      b = {
+        total: 0,
+        today: 0,
+        thisWeek: 0,
+        rolling5h: 0,
+        byClass: { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 },
+        byModel: {},
+        bySurface: {},
+        // Dollars scoped to this provider (populated only when opts.cost is supplied).
+        // The combined cost.* block is every provider's spend added together; a UI that
+        // labels a figure "Claude" needs Claude's own, or a priced Codex record inflates it.
+        cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0 },
+      };
+      providerBuckets.set(p, b);
+      providerOrder.push(p);
+    }
+    return b;
+  }
 
   for (const r of kept.values()) {
     const sum = usageSum(r.usage);
@@ -146,10 +191,20 @@ export function aggregate(records, opts = {}) {
     byClass.cacheRead += c.cacheRead;
     byClass.output += c.output;
 
-    const surface = classifySurface(r.model);
+    const provider = r.provider || "claude";
+    const pb = providerBucket(provider);
+    pb.total += sum;
+    pb.byClass.input += c.input;
+    pb.byClass.cacheCreate += c.cacheCreate;
+    pb.byClass.cacheRead += c.cacheRead;
+    pb.byClass.output += c.output;
+
+    const surface = classifySurface(r.model, provider);
     bySurface[surface] = (bySurface[surface] || 0) + sum;
+    pb.bySurface[surface] = (pb.bySurface[surface] || 0) + sum;
     const { base } = normalizeModel(r.model);
     byModel[base] = (byModel[base] || 0) + sum;
+    pb.byModel[base] = (pb.byModel[base] || 0) + sum;
     if (surface === "untracked") {
       untrackedTokens += sum;
       untrackedRequests++;
@@ -158,11 +213,12 @@ export function aggregate(records, opts = {}) {
     let usd = 0;
     let priced = false;
     if (costFn) {
-      const c2 = costFn(r.usage, r.model);
+      const c2 = costFn(r.usage, r.model, provider);
       usd = c2.usd || 0;
       priced = !!c2.priced;
       if (priced) {
         costTotal += usd;
+        pb.cost.total += usd;
         costByModel[base] = (costByModel[base] || 0) + usd;
       } else {
         unpricedTokens += sum;
@@ -178,20 +234,22 @@ export function aggregate(records, opts = {}) {
       // just mis-stamped. Makes rolling5h the documented half-open (now-5h, now].
       const tms = ts.getTime();
       if (tms <= now.getTime()) {
-        if (localDayKey(ts) === todayKey) today += sum;
-        if (tms >= weekStart) thisWeek += sum;
-        if (tms > rollingCutoff) rolling5h += sum;
+        const isToday = localDayKey(ts) === todayKey;
+        if (isToday) { today += sum; pb.today += sum; }
+        if (tms >= weekStart) { thisWeek += sum; pb.thisWeek += sum; }
+        if (tms > rollingCutoff) { rolling5h += sum; pb.rolling5h += sum; }
         if (priced) {
-          if (localDayKey(ts) === todayKey) costToday += usd;
-          if (tms >= weekStart) costWeek += usd;
-          if (tms > rollingCutoff) costRolling += usd;
+          if (isToday) { costToday += usd; pb.cost.today += usd; }
+          if (tms >= weekStart) { costWeek += usd; pb.cost.thisWeek += usd; }
+          if (tms > rollingCutoff) { costRolling += usd; pb.cost.rolling5h += usd; }
         }
-        stamps.push({ t: tms, sum });
+        if (provider === "claude") stamps.push({ t: tms, sum });
       }
     }
   }
 
-  // Pass 3 — current usage window (Anthropic-style fixed 5h reset blocks).
+  // Pass 3 — Claude's current usage window (Anthropic-style fixed 5h reset blocks), built
+  // from CLAUDE records only (see `stamps` above — other providers have their own windows).
   // A block starts at the EXACT first message (verified: Claude anchors the window to
   // your first message, not the top of the hour) and lasts blockHours; a gap >
   // blockHours, or crossing the block end, starts a new block. The reset time is exact.
@@ -230,7 +288,88 @@ export function aggregate(records, opts = {}) {
     pct: cap > 0 ? Math.round((windowTokens / cap) * 100) : null,
   };
 
+  // providers.<p>.windows (spec section 4/5). Claude's primary window is just windowStats
+  // (computed above from Claude's records alone), tagged with source/period metadata. Codex
+  // gets an "official" window formatted from an out-of-band snapshot the caller supplies —
+  // never computed/summed from records, because OpenAI publishes the real percentage.
+  const providers = {};
+  for (const p of providerOrder) {
+    const pb = providerBuckets.get(p);
+    const entry = {
+      today: pb.today,
+      total: pb.total,
+      thisWeek: pb.thisWeek,
+      rolling5h: pb.rolling5h,
+      byClass: pb.byClass,
+      byModel: pb.byModel,
+      bySurface: pb.bySurface,
+    };
+    // Mirrors the top-level rule: the cost block exists only when a pricing fn was injected.
+    if (costFn) entry.cost = pb.cost;
+    if (p === "claude") {
+      entry.windows = {
+        primary: { ...windowStats, source: "inferred", period: "5h" },
+      };
+    }
+    providers[p] = entry;
+  }
+
+  // Codex's windows come entirely from an out-of-band official snapshot (never
+  // derived from records — Phase 1 has no Codex reader). Formatting only: if the
+  // caller passes opts.codexRateLimits, surface it as providers.codex.windows/plan,
+  // creating the codex provider entry if Codex had no records of its own yet.
+  if (opts.codexRateLimits) {
+    const snap = opts.codexRateLimits;
+    if (!providers.codex) {
+      providers.codex = {
+        today: 0,
+        total: 0,
+        thisWeek: 0,
+        rolling5h: 0,
+        byClass: { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 },
+        byModel: {},
+        bySurface: {},
+        ...(costFn ? { cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0 } } : {}),
+      };
+      if (!providerOrder.includes("codex")) providerOrder.push("codex");
+    }
+    // resetAt/asOf are normalized to epoch ms here (not left as raw ISO strings) so
+    // providers.codex.windows.*.resetAt is consistent with the legacy top-level
+    // `window.resetAt` (also epoch ms) — one shape for "when does this reset" across
+    // the whole schema. Swift already parses these into `Date`; this only affects the
+    // JS aggregate() output.
+    const toEpochMs = (v) => {
+      // Real Codex logs carry resets_at as epoch SECONDS (asOf is an ISO string);
+      // accept both, tolerating ms-epoch numbers just in case.
+      if (typeof v === "number" && Number.isFinite(v)) {
+        return Math.round(v >= 1e12 ? v : v * 1000);
+      }
+      if (typeof v !== "string") return null;
+      const ms = Date.parse(v);
+      return isNaN(ms) ? null : ms;
+    };
+    // A window without used_percent is dropped whole (matches the Swift reader).
+    const fmtWindow = (w, period) =>
+      w && w.used_percent != null
+        ? {
+            source: "official",
+            period,
+            usedPct: w.used_percent ?? null,
+            resetAt: toEpochMs(w.resets_at),
+            windowMinutes: w.window_minutes ?? null,
+            cap: null,
+            calibratedCap: null,
+          }
+        : undefined;
+    providers.codex.windows = {
+      ...(fmtWindow(snap.primary, "5h") ? { primary: fmtWindow(snap.primary, "5h") } : {}),
+      ...(fmtWindow(snap.secondary, "weekly") ? { secondary: fmtWindow(snap.secondary, "weekly") } : {}),
+    };
+    providers.codex.plan = { planType: snap.plan_type ?? null, asOf: toEpochMs(snap.asOf) };
+  }
+
   return {
+    schemaVersion: 2,
     total,
     byClass,
     bySurface,
@@ -239,6 +378,8 @@ export function aggregate(records, opts = {}) {
     thisWeek,
     rolling5h,
     window: windowStats,
+    providerOrder,
+    providers,
     dedup: { counted, duplicatesDropped, collisionsDifferingTotals },
     approximate,
     untracked: { tokens: untrackedTokens, requests: untrackedRequests },
