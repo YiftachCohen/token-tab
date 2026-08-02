@@ -9,6 +9,8 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-08-02
+
 ### Fixed
 - **The `~/.codex` grant was unreachable in the shipped app.** 0.3.0 decided whether Codex
   was present with `fileExists(~/.codex)` and gated the "Grant read access" button on the
