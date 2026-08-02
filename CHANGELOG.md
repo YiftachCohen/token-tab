@@ -9,6 +9,20 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+### Fixed
+- **The `~/.codex` grant was unreachable in the shipped app.** 0.3.0 decided whether Codex
+  was present with `fileExists(~/.codex)` and gated the "Grant read access" button on the
+  same check — but a sandboxed app cannot `stat` `~/.codex` without a scope, so the check is
+  always false, folder there or not. Every sandboxed Codex user saw "~/.codex not found —
+  nothing to read" with no way to grant, and the button that would have fixed it was hidden
+  by the same false reading. Codex access now resolves through the three-way
+  granted / direct-read / needs-grant state Claude already used: the button is offered from a
+  state the sandbox can actually observe, the Settings row says "read access needed" instead
+  of claiming the folder is missing, and the ingest path reads the directory the user granted
+  rather than an assumed one. Granting `~/.codex/sessions` instead of `~/.codex` now also
+  works (it climbs to the root the reader walks). **No capability added** — same read-only
+  security-scoped bookmark, same entitlements.
+
 ## [0.3.0] — 2026-08-01
 
 ### Added

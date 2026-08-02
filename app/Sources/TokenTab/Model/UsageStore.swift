@@ -233,9 +233,11 @@ final class UsageStore: ObservableObject {
     /// on the 30s tick). Not persisted: focus is an in-session glance choice, not a setting.
     @Published var userFocus: Provider?
 
-    /// Whether ~/.codex exists on disk (independent of the toggle) — drives the Settings grant
-    /// row. Refreshed alongside the aggregate.
-    @Published private(set) var codexDirExists = false
+    /// Whether the resolved Codex root was actually readable on the last refresh (independent of
+    /// the toggle). NOT "does ~/.codex exist": under the sandbox that question is unanswerable
+    /// without a scope, so this is false until access is granted — the Settings copy has to say
+    /// "read access needed", not "not found".
+    @Published private(set) var codexReadable = false
 
     /// The providers this refresh ACTUALLY read, as resolved by the same gates the ingestion
     /// branches use (dir present + `Config.providerEnabled`, i.e. `TOKENTAB_PROVIDERS`, plus the
@@ -301,14 +303,19 @@ final class UsageStore: ObservableObject {
     /// counts stale until the 90s safety tick).
     private var pendingRefresh = false
     private var logDirProvider: () -> URL?
+    /// The Codex root to read, from the same AccessManager that owns the Claude one — so the
+    /// directory we ingest is the directory the user actually granted, not a path we assume.
+    private var codexDirProvider: () -> URL?
     /// Re-parses only the files that changed since the last refresh (keyed by mtime+size),
     /// so an active session's constant FSEvents bursts don't re-read the whole history — and
     /// persists across launches, so a cold start re-parses only what changed rather than the
     /// whole log history (the slow first read that left the loading screen up for seconds).
     private let recordCache = RecordCache(storeURL: RecordCache.defaultStoreURL())
 
-    init(logDir: @escaping () -> URL?) {
+    init(logDir: @escaping () -> URL?,
+         codexDir: @escaping () -> URL? = { CodexLogReader.defaultCodexRoot() }) {
         self.logDirProvider = logDir
+        self.codexDirProvider = codexDir
         let raw = UserDefaults.standard.string(forKey: "menuMetric") ?? MenuMetric.cost.rawValue
         self.menuMetric = MenuMetric(rawValue: raw) ?? .cost
         let scopeRaw = UserDefaults.standard.string(forKey: "menuBarScope") ?? MenuBarScope.both.rawValue
@@ -358,8 +365,7 @@ final class UsageStore: ObservableObject {
     /// promptly as a Claude one. Gated on the same two conditions as ingestion (the Settings
     /// toggle AND the env/dir gate), so a disabled or absent provider opens no stream at all.
     private func startCodexWatcher() {
-        guard codexWatcher == nil, codexEnabled else { return }
-        let root = CodexLogReader.defaultCodexRoot()
+        guard codexWatcher == nil, codexEnabled, let root = codexDirProvider() else { return }
         guard FileManager.default.fileExists(atPath: root.path),
               Config.providerEnabled("codex", dirExists: true) else { return }
         let w = FolderWatcher(path: root.path) { [weak self] in
@@ -397,6 +403,7 @@ final class UsageStore: ObservableObject {
         let forceBedrock = Config.useBedrock
         let inAppOverride = surfaceModeOverride   // @MainActor state, captured before detaching
         let codexOn = codexEnabled                // the Settings toggle, captured before detaching
+        let codexDir = codexDirProvider()         // @MainActor access state, same as `dir` above
         Task.detached(priority: .utility) {
             let now0 = Date()
             // Claude is provider-gated too, on the same TOKENTAB_PROVIDERS list the CLI honors —
@@ -419,12 +426,17 @@ final class UsageStore: ObservableObject {
             // only, never summed). A missing/unreadable ~/.codex is silently skipped.
             var codexRateLimits: CodexRateLimitsSnapshot? = nil
             var codexFileCount = 0
-            let codexRoot = CodexLogReader.defaultCodexRoot()
-            let codexDirExists = FileManager.default.fileExists(atPath: codexRoot.path)
+            // nil root = no access resolved yet (sandboxed, ~/.codex not granted) → nothing to read.
+            let codexReadable = codexDir.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
             // The Settings toggle is the sandbox-clean gate (UserDefaults); it AND the existing
             // env/dir gate must both allow Codex before we ingest a single line.
-            let codexActive = codexOn && Config.providerEnabled("codex", dirExists: codexDirExists)
-            if codexActive {
+            // `codexDir != nil` is part of the gate, not just a guard: an explicit
+            // TOKENTAB_PROVIDERS=codex makes providerEnabled true regardless of the dir, and
+            // codexActive is what the trust footer names — it must never claim a directory we
+            // never opened.
+            let codexActive = codexOn && codexDir != nil
+                && Config.providerEnabled("codex", dirExists: codexReadable)
+            if codexActive, let codexRoot = codexDir {
                 let codexFiles = CodexLogReader.findCodexJSONL(in: codexRoot)
                 codexFileCount = codexFiles.count
                 let cx = cache.codexRecords(for: codexFiles)
@@ -468,7 +480,7 @@ final class UsageStore: ObservableObject {
                    learned != self.calibratedCap {
                     self.calibratedCap = learned
                 }
-                self.codexDirExists = codexDirExists
+                self.codexReadable = codexReadable
                 self.claudeActive = claudeOn
                 self.codexActive = codexActive
                 self.isRefreshing = false

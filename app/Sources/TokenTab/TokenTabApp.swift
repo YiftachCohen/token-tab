@@ -39,7 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let access = AccessManager()
     /// The one-click switch for the bundled live-% helper (SMAppService / Login Items).
     private let helper = LiveHelperManager()
-    private lazy var store = UsageStore(logDir: { [weak self] in self?.access.logDir })
+    private lazy var store = UsageStore(logDir: { [weak self] in self?.access.logDir },
+                                        codexDir: { [weak self] in self?.access.codexLogDir })
     private var statusItem: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
