@@ -73,6 +73,50 @@ final class AccessPolicyTests: XCTestCase {
         XCTAssertEqual(AccessManager.resolveProjectsDir(under: root), root)
     }
 
+    // MARK: resolveCodexRoot
+
+    /// Picking ~/.codex itself is the happy path — the reader walks sessions/** under it.
+    func testCodexRootUsedAsIs() {
+        let root = URL(fileURLWithPath: "/Users/dev/.codex")
+        XCTAssertEqual(AccessManager.resolveCodexRoot(under: root), root)
+    }
+
+    /// Drilling one folder deeper in the picker still grants a usable scope: the reader looks
+    /// for `sessions` UNDER the root, so a `sessions` grant has to climb back up.
+    func testCodexSessionsDirClimbsToRoot() {
+        XCTAssertEqual(AccessManager.resolveCodexRoot(under: URL(fileURLWithPath: "/Users/dev/.codex/sessions")).path,
+                       "/Users/dev/.codex")
+        XCTAssertEqual(AccessManager.resolveCodexRoot(under: URL(fileURLWithPath: "/Users/dev/.codex/archived_sessions")).path,
+                       "/Users/dev/.codex")
+    }
+
+    // MARK: codexState
+    //
+    // The 0.3.0 regression: an invisible ~/.codex was reported as "not found", and the grant
+    // button was gated on the same unobservable check — so a sandboxed Codex user could never
+    // reach the picker. Not-listable must resolve to `.needsGrant`, never to a silent no-op.
+
+    func testUnlistableCodexRootAsksForAGrantRatherThanClaimingItIsMissing() {
+        let root = URL(fileURLWithPath: "/Users/dev/.codex")
+        XCTAssertEqual(AccessManager.codexState(bookmarked: nil, root: root, rootListable: false),
+                       .needsGrant(root))
+    }
+
+    func testListableCodexRootIsReadDirectly() {
+        let root = URL(fileURLWithPath: "/Users/dev/.codex")
+        XCTAssertEqual(AccessManager.codexState(bookmarked: nil, root: root, rootListable: true),
+                       .directRead(root))
+    }
+
+    /// A resolved bookmark wins over the default root — the granted scope IS the dir we read.
+    func testBookmarkWinsOverDefaultRoot() {
+        let granted = URL(fileURLWithPath: "/Volumes/Work/.codex")
+        XCTAssertEqual(AccessManager.codexState(bookmarked: granted,
+                                                root: URL(fileURLWithPath: "/Users/dev/.codex"),
+                                                rootListable: true),
+                       .granted(granted))
+    }
+
     private func makeTempDir() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("access-policy-\(UUID().uuidString)")

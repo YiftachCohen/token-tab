@@ -22,6 +22,14 @@ final class AccessManager: ObservableObject {
         case needsGrant(URL)     // sandboxed first run / stale bookmark → prompt
     }
 
+    /// Same three states for ~/.codex, minus `resolving` (it is settled synchronously in
+    /// `bootstrap()`, before any view reads it).
+    enum CodexState: Equatable {
+        case granted(URL)
+        case directRead(URL)
+        case needsGrant(URL)
+    }
+
     @Published private(set) var state: State = .resolving
     private let defaultsKey = "claudeFolderBookmark"
     private var scopedURL: URL?
@@ -29,14 +37,33 @@ final class AccessManager: ObservableObject {
     // Codex (~/.codex) read access is the exact same mechanism as Claude's: a user-granted,
     // read-only security-scoped bookmark — NOT a broadened entitlement (the app stays
     // files.user-selected.read-only only, so no home-folder access). The launch path below
-    // re-acquires a previously granted scope; the grant UI itself is a later phase, and
-    // unsandboxed `swift run` reads ~/.codex directly with no scope needed.
+    // re-acquires a previously granted scope; unsandboxed `swift run` reads ~/.codex directly
+    // with no scope needed.
     private let codexDefaultsKey = "codexFolderBookmark"
     private var codexScopedURL: URL?
 
-    /// Published so the Settings grant row can reflect "granted" vs "grant needed" live. True
-    /// once a ~/.codex scope is held (a saved bookmark resolved on launch, or a fresh grant).
-    @Published private(set) var codexGranted = false
+    /// Codex access, resolved exactly like Claude's `State`. Published so the Settings row can
+    /// show "granted" vs "grant needed" — and, crucially, so the grant button is offered from a
+    /// state the SANDBOX can actually observe. A `fileExists(~/.codex)` probe is always false
+    /// without a scope, so gating the button on "the folder exists" made the grant unreachable:
+    /// no grant → looks missing → no button → no grant. (Shipped that way in 0.3.0.)
+    @Published private(set) var codexState: CodexState = .needsGrant(CodexLogReader.defaultCodexRoot())
+
+    /// True once a ~/.codex scope is held (a saved bookmark resolved on launch, or a fresh grant).
+    var codexGranted: Bool { if case .granted = codexState { return true }; return false }
+
+    /// The Codex root to read, if any — the granted scope, or the default dir when unsandboxed.
+    var codexLogDir: URL? {
+        switch codexState {
+        case .granted(let u), .directRead(let u): return u
+        case .needsGrant: return nil
+        }
+    }
+
+    /// Whether the Settings row should offer the grant. The only honest signal in the sandbox:
+    /// we cannot tell "no ~/.codex" from "no permission to look", so we offer the picker and
+    /// let the user answer it.
+    var codexNeedsGrant: Bool { if case .needsGrant = codexState { return true }; return false }
 
     /// The directory we should read, if any.
     var logDir: URL? {
@@ -47,10 +74,7 @@ final class AccessManager: ObservableObject {
     }
 
     func bootstrap() {
-        // Re-acquire a previously granted ~/.codex scope for the app's lifetime (held until exit,
-        // like the Claude scope). No-op when none was ever granted — the Codex reader then finds no
-        // files under the sandbox and is silently skipped, exactly the intended fail-soft.
-        resolveCodexBookmark()
+        resolveCodexAccess()
         let target = LogReader.defaultLogDir()
         // 1) Try a saved bookmark (the sandboxed happy path). Route it through the
         //    same projects-dir resolution as a fresh grant, so a relaunch reads the
@@ -99,6 +123,27 @@ final class AccessManager: ObservableObject {
         return url
     }
 
+    /// Settle `codexState` at launch, mirroring `bootstrap()`'s three-way resolution for Claude:
+    /// a saved bookmark (re-acquired for the app's lifetime), else a direct read when the default
+    /// root is listable (unsandboxed dev), else "ask the user". Note the sandboxed case cannot
+    /// distinguish "~/.codex is absent" from "~/.codex is invisible to me" — both land on
+    /// `.needsGrant`, which is why the UI must offer the picker rather than claim "not found".
+    private func resolveCodexAccess() {
+        let root = CodexLogReader.defaultCodexRoot()
+        codexState = Self.codexState(
+            bookmarked: resolveCodexBookmark(),
+            root: root,
+            rootListable: (try? FileManager.default.contentsOfDirectory(atPath: root.path)) != nil
+        )
+    }
+
+    /// The resolution itself, as a pure decision so it can be pinned by a test.
+    nonisolated static func codexState(bookmarked: URL?, root: URL, rootListable: Bool) -> CodexState {
+        if let url = bookmarked { return .granted(url) }
+        if rootListable { return .directRead(root) }
+        return .needsGrant(root)
+    }
+
     /// Resolve the saved ~/.codex bookmark (if any) and hold its scope for the app's lifetime.
     /// Mirrors resolveSavedBookmark exactly, including the over-broad self-heal: a saved
     /// home-folder bookmark is dropped rather than re-opened, so a grant that slipped through
@@ -120,8 +165,7 @@ final class AccessManager: ObservableObject {
         codexScopedURL = nil
         guard url.startAccessingSecurityScopedResource() else { return nil }
         codexScopedURL = url
-        codexGranted = true
-        return url
+        return Self.resolveCodexRoot(under: url)
     }
 
     /// Open the folder picker for ~/.codex — the exact same read-only, security-scoped grant
@@ -163,7 +207,7 @@ final class AccessManager: ObservableObject {
         }
         guard chosen.startAccessingSecurityScopedResource() else { return false }
         codexScopedURL = chosen
-        codexGranted = true
+        codexState = .granted(Self.resolveCodexRoot(under: chosen))
         return true
     }
 
@@ -219,6 +263,16 @@ final class AccessManager: ObservableObject {
         let homePath = home.standardizedFileURL.resolvingSymlinksInPath().path
         if chosen == "/" || chosen == homePath { return true }
         return (homePath + "/").hasPrefix(chosen + "/")
+    }
+
+    /// The mirror of `resolveProjectsDir` for Codex, in the opposite direction: the reader walks
+    /// `sessions/` and `archived_sessions/` UNDER the root, so a user who opens the picker at
+    /// ~/.codex and drills one folder deeper (an easy click — `sessions` is the obvious target)
+    /// would otherwise grant a scope the reader looks straight past. Climb back to the root.
+    nonisolated static func resolveCodexRoot(under url: URL) -> URL {
+        let leaf = url.lastPathComponent
+        if leaf == "sessions" || leaf == "archived_sessions" { return url.deletingLastPathComponent() }
+        return url
     }
 
     /// If the user picked `.claude` itself, descend to `projects` (where the logs live);

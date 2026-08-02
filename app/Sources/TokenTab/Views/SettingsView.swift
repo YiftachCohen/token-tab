@@ -66,9 +66,12 @@ struct SettingsView: View {
                             detail: "~/.claude · always on")
                 providerRow(name: "Codex", accent: Theme.indigo, on: $store.codexEnabled, locked: false,
                             detail: codexDetail)
-                if store.codexEnabled, store.codexDirExists, !access.codexGranted {
-                    // ~/.codex exists but the sandbox has no scope yet → offer the grant (mirrors
-                    // the first-run ~/.claude grant). Unsandboxed dev reads it directly (no grant).
+                if store.codexEnabled, access.codexNeedsGrant {
+                    // No scope on ~/.codex yet → offer the grant (mirrors the first-run ~/.claude
+                    // grant). Deliberately NOT gated on "the folder exists": a sandboxed app can't
+                    // stat ~/.codex without a scope, so that check is false even when Codex is
+                    // installed — which is exactly how 0.3.0 hid this button from Codex users.
+                    // Unsandboxed dev resolves to .directRead and never shows it.
                     Button {
                         if access.requestCodexAccess() { store.accessChanged() }
                     } label: {
@@ -296,12 +299,15 @@ struct SettingsView: View {
         }
     }
 
-    /// Codex's one-line status under the toggle: whether logs exist and are readable.
+    /// Codex's one-line status under the toggle. Order matters: access comes first, because
+    /// without a scope the sandbox genuinely cannot tell "~/.codex isn't there" from "I'm not
+    /// allowed to look" — and claiming the former to a Codex user is simply wrong.
     private var codexDetail: String {
-        if !store.codexDirExists { return "~/.codex not found — nothing to read" }
-        if store.codexEnabled && access.codexGranted { return "~/.codex · granted" }
-        if store.codexEnabled { return "~/.codex · read access needed" }
-        return "~/.codex · disabled"
+        if !store.codexEnabled { return "~/.codex · disabled" }
+        if access.codexNeedsGrant { return "~/.codex · read access needed" }
+        if !store.hasLoadedOnce { return "~/.codex · checking…" }
+        if !store.codexReadable { return "~/.codex not found — nothing to read" }
+        return access.codexGranted ? "~/.codex · granted" : "~/.codex · reading"
     }
 
     // Absolute, cwd-independent install commands when we can locate the repo's adapters/ dir
