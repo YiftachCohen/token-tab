@@ -60,7 +60,11 @@ struct CodexPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if stale, let asOf = snapshot.codexAsOf {
                         // Not live — the official % is only as fresh as the newest token_count.
-                        Text("as of \(Fmt.clock(asOf))")
+                        // Day context, not a bare clock: this caption is the whole staleness
+                        // signal, and against a WEEKLY window it can be days old and still be
+                        // about the open window. "as of 21:15" then reads as fifteen minutes
+                        // ago when it was Saturday (the same trap the reset label had).
+                        Text("as of \(Fmt.resetLabel(asOf, relativeTo: now))")
                             .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
                     }
                 }
