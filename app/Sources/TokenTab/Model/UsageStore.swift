@@ -119,6 +119,11 @@ struct Snapshot {
     /// Codex's official weekly window.
     var codexSecondary: ProviderWindow? { codex?.windows["secondary"] }
 
+    /// The official window the Codex panel can display. Prefer the comparable 5h allowance;
+    /// fall back to weekly when that is the only limit OpenAI emitted. Menu-bar pressure keeps
+    /// using `codexPrimary` only so a weekly percentage is never compared with Claude's 5h %.
+    var codexDisplayWindow: ProviderWindow? { codexPrimary ?? codexSecondary }
+
     /// True once the official window a recorded percentage belongs to has already reset. Past
     /// that instant the number is not "stale but indicative" — it describes a DIFFERENT window,
     /// and OpenAI restarts the new one at 0%. Left unexpired when the snapshot carries no
@@ -135,19 +140,27 @@ struct Snapshot {
     /// Codex's official 5h window has outlived the window it was recorded against.
     func codexWindowExpired(now: Date) -> Bool { Self.expired(codexPrimary, now: now) }
 
+    func codexDisplayWindowExpired(now: Date) -> Bool { Self.expired(codexDisplayWindow, now: now) }
+
+    private static func currentUsedPct(_ window: ProviderWindow?, now: Date) -> Int? {
+        guard !expired(window, now: now), let p = window?.usedPct else { return nil }
+        return max(0, min(100, Int(p.rounded())))
+    }
+
     /// Codex's official 5h "% used" (0…100), rounded — the only REAL Codex percentage, and
     /// only while the window it was recorded against is still open. nil past the reset, so
     /// every caller (headline ranking, ring fraction, figure) falls back to tokens together.
     func codexUsedPct(now: Date) -> Int? {
-        guard !codexWindowExpired(now: now), let p = codexPrimary?.usedPct else { return nil }
-        return max(0, min(100, Int(p.rounded())))
+        Self.currentUsedPct(codexPrimary, now: now)
     }
     /// Codex's official 5h "% left" — the Codex hero gauge fill.
     func codexLeftPct(now: Date) -> Int? { codexUsedPct(now: now).map { 100 - $0 } }
 
+    func codexDisplayUsedPct(now: Date) -> Int? { Self.currentUsedPct(codexDisplayWindow, now: now) }
+    func codexDisplayLeftPct(now: Date) -> Int? { codexDisplayUsedPct(now: now).map { 100 - $0 } }
+
     func codexWeeklyUsedPct(now: Date) -> Int? {
-        guard !Self.expired(codexSecondary, now: now), let p = codexSecondary?.usedPct else { return nil }
-        return max(0, min(100, Int(p.rounded())))
+        Self.currentUsedPct(codexSecondary, now: now)
     }
 
     /// When the official Codex snapshot was captured (newest token_count). Drives the
@@ -158,7 +171,7 @@ struct Snapshot {
     /// The official Codex % is only as fresh as the newest token_count. Past ~10 min we stop
     /// implying "live" and show a "last known" affordance instead (design §3, §6).
     func codexStale(now: Date, ttl: TimeInterval = 600) -> Bool {
-        guard let asOf = codexAsOf else { return codexUsedPct(now: now) != nil }  // no timestamp ⇒ stale
+        guard let asOf = codexAsOf else { return codexDisplayUsedPct(now: now) != nil }  // no timestamp ⇒ stale
         return now.timeIntervalSince(asOf) > ttl
     }
 

@@ -661,17 +661,35 @@ public func aggregate(_ records: [UsageRecord],
             providerBuckets["codex"] = b
             providerOrder.append("codex")
         }
-        if let p = snap.primary {
-            providerBuckets["codex"]!.windows["primary"] = ProviderWindow(
-                source: "official", period: "5h",
-                resetAt: p.resetsAt, cap: nil, calibratedCap: nil,
-                usedPct: p.usedPercent, windowMinutes: p.windowMinutes)
+        // The raw primary/secondary field names are not semantic. Codex can emit a
+        // weekly-only 10080-minute allowance in `primary`, so classify by the declared
+        // duration. Unknown/missing durations keep their raw fallback slot for compatibility;
+        // a declared duration wins if both raw fields collapse onto the same semantic key.
+        typealias ClassifiedWindow = (window: CodexRateLimitsSnapshot.Window, period: String, rank: Int)
+        var classified: [String: ClassifiedWindow] = [:]
+        let rawWindows: [(fallback: String, window: CodexRateLimitsSnapshot.Window?)] = [
+            ("primary", snap.primary), ("secondary", snap.secondary)
+        ]
+        for raw in rawWindows {
+            guard let window = raw.window else { continue }
+            let key: String
+            let rank: Int
+            switch window.windowMinutes {
+            case 300: key = "primary"; rank = 1
+            case 10080: key = "secondary"; rank = 1
+            default: key = raw.fallback; rank = 0
+            }
+            let period = key == "primary" ? "5h" : "weekly"
+            if classified[key] == nil || rank > classified[key]!.rank {
+                classified[key] = (window, period, rank)
+            }
         }
-        if let s = snap.secondary {
-            providerBuckets["codex"]!.windows["secondary"] = ProviderWindow(
-                source: "official", period: "weekly",
-                resetAt: s.resetsAt, cap: nil, calibratedCap: nil,
-                usedPct: s.usedPercent, windowMinutes: s.windowMinutes)
+        for key in ["primary", "secondary"] {
+            guard let item = classified[key] else { continue }
+            providerBuckets["codex"]!.windows[key] = ProviderWindow(
+                source: "official", period: item.period,
+                resetAt: item.window.resetsAt, cap: nil, calibratedCap: nil,
+                usedPct: item.window.usedPercent, windowMinutes: item.window.windowMinutes)
         }
         providerBuckets["codex"]!.plan = CodexPlan(planType: snap.planType, asOf: snap.asOf)
     }

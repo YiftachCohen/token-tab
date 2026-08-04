@@ -75,11 +75,35 @@ public enum Fmt {
     }
 
     /// Reset clock time like the design's "resets 11:33" (local time, 24h or 12h per locale).
-    public static func clock(_ date: Date?) -> String {
+    public static func clock(_ date: Date?,
+                             calendar: Calendar = .current,
+                             locale: Locale = .current) -> String {
         guard let date else { return "—" }
         let f = DateFormatter()
+        f.calendar = calendar
+        f.locale = locale
+        f.timeZone = calendar.timeZone
         f.timeStyle = .short
         f.dateStyle = .none
+        return f.string(from: date)
+    }
+
+    /// Reset label with enough context to be truthful: clock-only for today, weekday + clock
+    /// otherwise. A weekly reset at Saturday 18:19 must not look like an already-missed reset
+    /// at 18:19 today.
+    public static func resetLabel(_ date: Date?,
+                                  relativeTo now: Date,
+                                  calendar: Calendar = .current,
+                                  locale: Locale = .current) -> String {
+        guard let date else { return "—" }
+        if calendar.isDate(date, inSameDayAs: now) {
+            return clock(date, calendar: calendar, locale: locale)
+        }
+        let f = DateFormatter()
+        f.calendar = calendar
+        f.locale = locale
+        f.timeZone = calendar.timeZone
+        f.setLocalizedDateFormatFromTemplate("EEEjm")
         return f.string(from: date)
     }
 

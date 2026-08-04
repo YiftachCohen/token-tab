@@ -159,13 +159,29 @@ function fmtClock(ms) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+// Clock-only for a reset today; weekday + clock otherwise. A weekly reset on Saturday at
+// 18:19 must not look like an already-missed reset at 18:19 today.
+function fmtReset(ms, now = Date.now()) {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  const d = new Date(ms);
+  const n = new Date(now);
+  if (d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()) {
+    return fmtClock(ms);
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
 // One official Codex window as a line. A window past its resetAt is labelled "last known"
 // rather than "official": the percentage is real, but it belongs to a window that has since
 // reset, so presenting it in the present tense would overstate it (see windowCurrent).
 function officialWindowLine(label, w, now = Date.now()) {
   return windowCurrent(w, now)
-    ? `${label}: ${w.usedPct}% used · resets ${fmtClock(w.resetAt)} · official`
-    : `${label}: ${w.usedPct}% used · window reset at ${fmtClock(w.resetAt)} · last known`;
+    ? `${label}: ${w.usedPct}% used · resets ${fmtReset(w.resetAt, now)} · official`
+    : `${label}: ${w.usedPct}% used · window reset at ${fmtReset(w.resetAt, now)} · last known`;
 }
 
 // An official Codex window whose recorded resetAt has already passed describes a window
