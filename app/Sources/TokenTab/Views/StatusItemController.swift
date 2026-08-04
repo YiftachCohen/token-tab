@@ -34,9 +34,13 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let selection = MenuSelectionState()
 
     private var statusItem: NSStatusItem?
-    private var hostingView: NSHostingView<MenuBarLabelHost>?
+    private var hostingView: MeasuringHostingView<MenuBarLabelHost>?
     private var popover: NSPopover?
     private var storeObserver: AnyCancellable?
+    /// One pending re-measure at a time: both triggers (a store publish and a SwiftUI size
+    /// invalidation) can fire several times per update, and re-measuring resizes the button,
+    /// which can invalidate again. Coalescing keeps that from becoming a treadmill.
+    private var lengthUpdateScheduled = false
 
     init(store: UsageStore, access: AccessManager, helper: LiveHelperManager) {
         self.store = store
@@ -48,13 +52,20 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
 
-        let host = NSHostingView(rootView: MenuBarLabelHost(store: store, selection: selection))
+        let host = MeasuringHostingView(rootView: MenuBarLabelHost(store: store, selection: selection))
         host.sizingOptions = [.intrinsicContentSize]
         host.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(host)
+        // Leading + centerY are required; trailing is not. A required trailing pin makes the
+        // BUTTON's width authoritative over the label's, so any moment the item is narrower
+        // than the reading — a length update that hasn't landed yet — SwiftUI resolves it by
+        // truncating a figure ("92%" → "92…"). At low priority the label keeps its own width
+        // and the item catches up, which is the only correct direction for a status item.
+        let trailing = host.trailingAnchor.constraint(equalTo: button.trailingAnchor)
+        trailing.priority = .defaultLow
         NSLayoutConstraint.activate([
             host.leadingAnchor.constraint(equalTo: button.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: button.trailingAnchor),
+            trailing,
             host.centerYAnchor.constraint(equalTo: button.centerYAnchor),
         ])
 
@@ -66,19 +77,42 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         // `variableLength` alone leaves the button sizing to an intrinsic size the hosted view
         // reports a beat late, which shows up as a clipped or zero-width item on first paint.
-        // Driving `length` from the hosted view's fitting width makes it deterministic, and
-        // re-driving it on every store change keeps it correct when the figures change width
-        // (e.g. "9%" → "100%", or a provider appearing and adding a second pair).
+        // Driving `length` from the hosted view's ideal width makes it deterministic.
+        //
+        // It has to be re-driven whenever the label's ideal width changes ("9%" → "100%", a
+        // second provider appearing, a Codex % lapsing into a token count). A store publish is
+        // NOT a reliable signal for that: it fires before SwiftUI has applied the update, and
+        // any publish that gets missed leaves the item stuck narrow indefinitely — the released
+        // 0.3.2 sat at a one-pair 56pt while rendering a two-pair label, which is what the
+        // ellipsis in the bar actually was. `MeasuringHostingView` reports the moment SwiftUI
+        // invalidates its own intrinsic size instead, so the trigger is the size change itself.
+        host.onIntrinsicSizeInvalidated = { [weak self] in
+            self?.scheduleLengthUpdate()
+        }
         updateLength()
         storeObserver = store.objectWillChange.sink { [weak self] _ in
-            Task { @MainActor in self?.updateLength() }
+            Task { @MainActor in self?.scheduleLengthUpdate() }
+        }
+    }
+
+    /// Re-measure on the next main-actor turn — after SwiftUI has applied whatever change
+    /// triggered this, and never in the middle of the layout pass that reported it.
+    private func scheduleLengthUpdate() {
+        guard !lengthUpdateScheduled else { return }
+        lengthUpdateScheduled = true
+        Task { @MainActor in
+            self.lengthUpdateScheduled = false
+            self.updateLength()
         }
     }
 
     private func updateLength() {
         guard let item = statusItem, let host = hostingView else { return }
         host.layoutSubtreeIfNeeded()
-        let width = ceil(host.fittingSize.width)
+        // The hosted view's OWN ideal width, never `fittingSize` on the installed view: fitting
+        // size is resolved against the constraints it currently lives under, so measuring it
+        // while the button is too narrow risks confirming the too-narrow width forever.
+        let width = ceil(host.idealWidth)
         guard width > 0, abs(item.length - width) > 0.5 else { return }
         item.length = width
     }
@@ -114,9 +148,38 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
+/// An `NSHostingView` that says when its SwiftUI content changes size, and reports that size
+/// without consulting the constraints it is installed under.
+///
+/// Both matter for a status item: the item's `length` is what gives the label its width, so the
+/// label's ideal width has to reach `length` — never the other way round. Reading `fittingSize`
+/// of the installed view can hand back a width already limited by the item, and a status item
+/// that is one figure too narrow doesn't look narrow, it looks like a truncated number.
+final class MeasuringHostingView<Content: View>: NSHostingView<Content> {
+    /// Called when SwiftUI invalidates the hosted content's intrinsic size — i.e. exactly when
+    /// the label's ideal width may have changed, regardless of what published it.
+    var onIntrinsicSizeInvalidated: (() -> Void)?
+
+    /// The width the content wants, independent of the width it currently has.
+    var idealWidth: CGFloat {
+        let intrinsic = intrinsicContentSize.width
+        return intrinsic > 0 ? intrinsic : fittingSize.width
+    }
+
+    override func invalidateIntrinsicContentSize() {
+        super.invalidateIntrinsicContentSize()
+        onIntrinsicSizeInvalidated?()
+    }
+}
+
 /// The hosted label. It observes the store itself (an NSHostingView's root view is not in a
 /// SwiftUI scene, so nothing else would re-render it) and adds the status item's internal
 /// horizontal padding, which the button no longer supplies for a custom subview.
+///
+/// `.fixedSize()` is load-bearing: without it a menu-bar figure is a truncatable string, so any
+/// width shortfall — even a transient one, between a figure growing and the item resizing —
+/// renders as "92…" rather than as a slightly clipped label. A number in the menu bar is either
+/// readable or it is misinformation; it must never quietly lose a digit or a percent sign.
 struct MenuBarLabelHost: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var selection: MenuSelectionState
@@ -125,5 +188,6 @@ struct MenuBarLabelHost: View {
         MenuBarLabel(snapshot: store.snapshot, menuMetric: store.menuMetric,
                      scope: store.menuBarScope, now: store.clock, selected: selection.isOpen)
             .padding(.horizontal, 5)
+            .fixedSize()
     }
 }

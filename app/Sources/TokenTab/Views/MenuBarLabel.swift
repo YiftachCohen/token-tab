@@ -16,6 +16,11 @@
 // the rings fill. Codex's official reading is natively "% used", so it's inverted here (a
 // 92%-full ring beside the figure "8%" read as a contradiction, because it was one).
 //
+// In its own pair Codex shows whichever official window it published — 5h when there is one,
+// else the weekly-only allowance current Codex builds emit — because that pair is Codex's own
+// slot, not a comparison. Only the single `.headline` figure stays 5h-only, since that one IS
+// a comparison against Claude's 5h % (the 2026-08-02 DESIGN.md row).
+//
 // The glyph is drawn as an NSImage (not a SwiftUI Shape) for historical reasons: under
 // MenuBarExtra, custom shape-drawing was dropped in the status item, which is why the ring
 // was invisible. That ceiling is gone — StatusItemController hosts this label in an
@@ -91,7 +96,7 @@ struct MenuBarLabel: View {
     /// has usage but no rate-limits reading yet gets a flat dot beside its token count —
     /// never a ring implying a percentage we don't have. Mirrors SecondaryProviderRow.
     var codexGlyph: NSImage {
-        guard snapshot.codexUsedPct(now: now) != nil else { return MenuGlyph.dot(color: NSColor(Theme.indigo)) }
+        guard snapshot.codexDisplayUsedPct(now: now) != nil else { return MenuGlyph.dot(color: NSColor(Theme.indigo)) }
         return MenuGlyph.ring(fraction: codexRingFraction, arc: NSColor(Theme.indigo))
     }
 
@@ -114,10 +119,16 @@ struct MenuBarLabel: View {
         }
     }
 
-    /// Codex's figure in dual mode: its official 5h % LEFT (matching Claude's reading and its
-    /// own ring), else its day's tokens when there's no official reading to show.
+    /// Codex's figure in dual mode: its official % LEFT (matching Claude's reading and its own
+    /// ring), else its day's tokens when there's no official reading to show. This is Codex's
+    /// OWN slot, so it shows whichever official window Codex actually published — the 5h
+    /// allowance when there is one, else the weekly-only one, exactly as the dropdown's Codex
+    /// row and panel do. (`codexLeftPct` is the 5h-only reading, and it stays 5h-only where it
+    /// belongs: `headlineProvider`, where a weekly % must never be compared with Claude's 5h %.
+    /// Using it here is what made a weekly-only Codex — the current OpenAI shape — fall all the
+    /// way through to a token count in the bar while the panel showed a percentage.)
     var codexFigure: String {
-        if let left = snapshot.codexLeftPct(now: now) { return "\(left)%" }
+        if let left = snapshot.codexDisplayLeftPct(now: now) { return "\(left)%" }
         return Fmt.abbrev(snapshot.codex?.today ?? 0)
     }
 
@@ -148,8 +159,10 @@ struct MenuBarLabel: View {
         return snapshot.agg.window.timeLeftFraction(now: now) ?? 0
     }
 
-    /// Codex ring: fraction LEFT of the official 5h limit (100 − usedPct).
-    private var codexRingFraction: Double { Double(snapshot.codexLeftPct(now: now) ?? 0) / 100 }
+    /// Codex ring: fraction LEFT of the official limit it is drawn beside (100 − usedPct) —
+    /// the displayed window, so ring and figure can never disagree. In the single-label path
+    /// that window is always the 5h one (only a 5h reading can headline).
+    private var codexRingFraction: Double { Double(snapshot.codexDisplayLeftPct(now: now) ?? 0) / 100 }
 
     var text: String {
         // Codex focus: the official 5h window as "% LEFT" — the same reading as Claude's %
