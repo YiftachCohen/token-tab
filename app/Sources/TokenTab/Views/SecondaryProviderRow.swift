@@ -50,7 +50,7 @@ struct SecondaryProviderRow: View {
     private var ringFraction: Double? {
         switch provider {
         case .codex:
-            return snapshot.codexLeftPct(now: now).map { Double($0) / 100 }
+            return snapshot.codexDisplayLeftPct(now: now).map { Double($0) / 100 }
         case .claude:
             if let q = snapshot.quotaLeft(now: now) { return Double(q.pct) / 100 }
             return nil
@@ -61,7 +61,7 @@ struct SecondaryProviderRow: View {
     private var trailing: String {
         switch provider {
         case .codex:
-            if let l = snapshot.codexLeftPct(now: now) { return "\(l)%" }
+            if let l = snapshot.codexDisplayLeftPct(now: now) { return "\(l)%" }
             return Fmt.abbrev(snapshot.codex?.today ?? 0)
         case .claude:
             if let q = snapshot.quotaLeft(now: now) { return "\(q.pct)%" }
@@ -73,9 +73,13 @@ struct SecondaryProviderRow: View {
     private var summary: String {
         switch provider {
         case .codex:
-            if let used = snapshot.codexUsedPct(now: now) {
-                let reset = snapshot.codexPrimary?.resetAt
-                return reset != nil ? "\(used)% of 5h · resets \(Fmt.clock(reset))" : "\(used)% of official 5h limit"
+            if let used = snapshot.codexDisplayUsedPct(now: now) {
+                let window = snapshot.codexDisplayWindow
+                let period = window?.period == "weekly" ? "weekly" : "5h"
+                let reset = window?.resetAt
+                return reset != nil
+                    ? "\(used)% of \(period) · resets \(Fmt.resetLabel(reset, relativeTo: now))"
+                    : "\(used)% of official \(period) limit"
             }
             return "\(Fmt.abbrev(snapshot.codex?.today ?? 0)) today"
         case .claude:

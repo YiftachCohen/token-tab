@@ -361,10 +361,27 @@ export function aggregate(records, opts = {}) {
             calibratedCap: null,
           }
         : undefined;
-    providers.codex.windows = {
-      ...(fmtWindow(snap.primary, "5h") ? { primary: fmtWindow(snap.primary, "5h") } : {}),
-      ...(fmtWindow(snap.secondary, "weekly") ? { secondary: fmtWindow(snap.secondary, "weekly") } : {}),
-    };
+    // The raw primary/secondary field names are not semantic. In current Codex logs a
+    // weekly-only allowance can arrive in `primary`; window_minutes is the authoritative
+    // discriminator. Keep unknown/missing durations in their raw fallback slot so an older
+    // producer does not lose data, but let a declared duration win any collision.
+    const classified = {};
+    const priority = {};
+    for (const [fallbackKey, w] of [
+      ["primary", snap.primary],
+      ["secondary", snap.secondary],
+    ]) {
+      if (!w || w.used_percent == null) continue;
+      const declared = w.window_minutes === 300 || w.window_minutes === 10080;
+      const key = w.window_minutes === 300 ? "primary" : w.window_minutes === 10080 ? "secondary" : fallbackKey;
+      const period = key === "primary" ? "5h" : "weekly";
+      const rank = declared ? 1 : 0;
+      if (!(key in classified) || rank > priority[key]) {
+        classified[key] = fmtWindow(w, period);
+        priority[key] = rank;
+      }
+    }
+    providers.codex.windows = classified;
     providers.codex.plan = { planType: snap.plan_type ?? null, asOf: toEpochMs(snap.asOf) };
   }
 

@@ -1,0 +1,34 @@
+{
+  "name": "Codex weekly-only snapshot is classified by duration, not raw slot name",
+  "_comment": "Observed production shape on 2026-08-02: Codex emitted only rate_limits.primary, but window_minutes was 10080 (one week). The semantic providers.codex.windows key must therefore be secondary/weekly; treating the raw primary slot as a 5h limit produces a false 5h gauge and a clock-only reset that appears to be in the past.",
+  "now": "2026-08-02T20:00:00Z",
+  "cap": 0,
+  "records": [],
+  "codexRateLimits": {
+    "primary": { "used_percent": 57, "resets_at": 1786205946, "window_minutes": 10080 },
+    "plan_type": "plus",
+    "asOf": "2026-08-02T20:00:00Z"
+  },
+  "expect": {
+    "total": 0,
+    "providerOrder": ["codex"],
+    "providers": {
+      "codex": {
+        "today": 0,
+        "total": 0,
+        "windows": {
+          "secondary": {
+            "source": "official",
+            "period": "weekly",
+            "usedPct": 57,
+            "resetAtMs": 1786205946000,
+            "windowMinutes": 10080,
+            "cap": null,
+            "calibratedCap": null
+          }
+        },
+        "plan": { "planType": "plus", "asOfMs": 1785700800000 }
+      }
+    }
+  }
+}

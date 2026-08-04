@@ -186,16 +186,19 @@ test("CLAUDE_CODE_USE_BEDROCK=1 from the env file forces Bedrock", async () => {
 // refuses to headline (or present-tense) an official window whose resetAt has passed — a
 // fixed 2026 date would silently expire and turn these tests into no-ops. `resetsInHours`
 // is negative for the expired case.
-function makeCodexRoot({ resetsInHours = 4 } = {}) {
+function makeCodexRoot({ resetsInHours = 4, weeklyOnly = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "tokentab-io-codex-"));
   const day = join(root, "sessions", "2026", "06", "20");
   mkdirSync(day, { recursive: true });
-  const primaryReset = new Date(Date.now() + resetsInHours * 3600_000).toISOString();
+  const primaryReset = new Date(Date.now() + (weeklyOnly ? 6 * 24 : resetsInHours) * 3600_000).toISOString();
   const secondaryReset = new Date(Date.now() + (resetsInHours + 168) * 3600_000).toISOString();
+  const rateLimits = weeklyOnly
+    ? `"primary":{"used_percent":57,"resets_at":"${primaryReset}","window_minutes":10080}`
+    : `"primary":{"used_percent":7,"resets_at":"${primaryReset}","window_minutes":300},"secondary":{"used_percent":48,"resets_at":"${secondaryReset}","window_minutes":10080}`;
   const lines = [
     `{"type":"session_meta","timestamp":"2026-06-20T12:00:00Z","payload":{"id":"019ee600-0000-7000-8000-000000000099"}}`,
     `{"type":"turn_context","payload":{"model":"gpt-5.4"}}`,
-    `{"type":"event_msg","timestamp":"2026-06-20T12:01:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":300,"total_tokens":1300}},"rate_limits":{"primary":{"used_percent":7,"resets_at":"${primaryReset}","window_minutes":300},"secondary":{"used_percent":48,"resets_at":"${secondaryReset}","window_minutes":10080},"plan_type":"plus"}}}`,
+    `{"type":"event_msg","timestamp":"2026-06-20T12:01:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":300,"total_tokens":1300}},"rate_limits":{${rateLimits},"plan_type":"plus"}}}`,
   ].join("\n");
   writeFileSync(join(day, "rollout-2026-06-20T12-00-00-019ee600-0000-7000-8000-000000000099.jsonl"), lines + "\n");
   return { root, primaryReset };
@@ -242,10 +245,27 @@ test("human report: Codex section shows official windows + per-model breakdown; 
     const env = isolatedEnv(dir, { TOKENTAB_CODEX_LOG_DIR: codexRoot });
     const { stdout } = await run("node", [CLI], { env });
     assert.match(stdout, /Codex ─/, "Codex section header present");
-    assert.match(stdout, /5h window: 7% used · resets \d\d:\d\d · official/);
-    assert.match(stdout, /This week: 48% used · resets \d\d:\d\d · official/);
+    assert.match(stdout, /5h window: 7% used · resets .+ · official/);
+    assert.match(stdout, /This week: 48% used · resets .+ · official/);
     assert.match(stdout, /gpt-5\.4/);
     assert.match(stdout, /0 network calls · reads ~\/\.claude \+ ~\/\.codex/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(codexRoot, { recursive: true, force: true });
+  }
+});
+
+test("human report: a weekly-only raw primary is labelled as this week with a dated reset", async () => {
+  const dir = makeFixtureDir();
+  const { root: codexRoot } = makeCodexRoot({ weeklyOnly: true });
+  try {
+    const env = isolatedEnv(dir, { TOKENTAB_CODEX_LOG_DIR: codexRoot });
+    const { stdout } = await run("node", [CLI], { env });
+    assert.doesNotMatch(stdout, /5h window: 57% used/, "a 10080-minute window is not a 5h limit");
+    assert.match(stdout, /This week: 57% used · resets .+ · official/);
+    const bar = (await run("node", [CLI, "--swiftbar"], { env })).stdout;
+    assert.ok(!bar.split("\n")[0].includes("Cdx"), "a weekly percentage cannot win 5h pressure ranking");
+    assert.match(bar, /This week: 57% used · resets .+ · official/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(codexRoot, { recursive: true, force: true });
@@ -273,7 +293,7 @@ test("--swiftbar: Codex official % headlines with a Cdx suffix when it out-press
     // quotes the official reading in its native "% used" form.
     assert.match(stdout.split("\n")[0], /^◧ 93% Cdx$/, "Codex's real % headlines as % left, with the Cdx suffix");
     assert.match(stdout, /Codex —/);
-    assert.match(stdout, /5h window: 7% used · resets \d\d:\d\d · official/);
+    assert.match(stdout, /5h window: 7% used · resets .+ · official/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(codexRoot, { recursive: true, force: true });
@@ -334,7 +354,7 @@ test("--swiftbar: an EXPIRED Codex window never headlines (its % belongs to a wi
     assert.ok(!headline.includes("Cdx"), `expired Codex % must not headline, got: ${headline}`);
     assert.match(headline, /^◧ \d/, "falls back to combined today-tokens");
     // The detail line still reports the number — it's real — but not in the present tense.
-    assert.match(stdout, /5h window: 7% used · window reset at \d\d:\d\d · last known/);
+    assert.match(stdout, /5h window: 7% used · window reset at .+ · last known/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(codexRoot, { recursive: true, force: true });

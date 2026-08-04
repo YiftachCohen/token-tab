@@ -339,4 +339,19 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Fmt.modelName("claude-fable-5"), "Fable 5")
         XCTAssertEqual(Fmt.modelName("sonnet"), "Sonnet")
     }
+
+    func testResetLabelAddsDayContextWhenResetIsNotToday() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let locale = Locale(identifier: "en_GB")
+        let now = date("2026-08-02T20:00:00Z")
+        let sameDay = date("2026-08-02T22:19:00Z")
+        let nextWeek = date("2026-08-08T18:19:00Z")
+
+        XCTAssertEqual(Fmt.resetLabel(sameDay, relativeTo: now, calendar: cal, locale: locale),
+                       Fmt.clock(sameDay, calendar: cal, locale: locale))
+        let weekly = Fmt.resetLabel(nextWeek, relativeTo: now, calendar: cal, locale: locale)
+        XCTAssertTrue(weekly.contains("Sat"), "a future weekly reset must identify its day: \(weekly)")
+        XCTAssertTrue(weekly.contains("18:19"), "the reset label still includes its clock: \(weekly)")
+    }
 }

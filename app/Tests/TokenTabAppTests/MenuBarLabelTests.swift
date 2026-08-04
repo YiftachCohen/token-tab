@@ -219,6 +219,25 @@ final class MenuBarLabelTests: XCTestCase {
         XCTAssertEqual(snap.codexUsedPct(now: now), 8)
     }
 
+    /// Current Codex logs may put a weekly-only limit in the raw `primary` slot. After core
+    /// normalization that arrives here as `secondary`; the panel may display it, but the
+    /// max-pressure/menu-bar helpers must not compare a weekly percentage to Claude's 5h %.
+    func testWeeklyOnlyWindowIsDisplayableWithoutMasqueradingAsFiveHourPressure() {
+        var snap = snapshot(claudeToday: 20_000_000, codexToday: 9_000_000)
+        snap.agg.providers["codex"]?.windows["secondary"] =
+            ProviderWindow(source: "official", period: "weekly",
+                           resetAt: now.addingTimeInterval(6 * 24 * 3600),
+                           usedPct: 57, windowMinutes: 10080)
+
+        XCTAssertNil(snap.codexPrimary)
+        XCTAssertEqual(snap.codexDisplayWindow?.period, "weekly")
+        XCTAssertEqual(snap.codexDisplayUsedPct(now: now), 57)
+        XCTAssertEqual(snap.codexDisplayLeftPct(now: now), 43)
+        XCTAssertNil(snap.codexUsedPct(now: now), "weekly usage is not a comparable 5h pressure")
+        XCTAssertEqual(snap.headlineProvider(now: now), .claude,
+                       "without a 5h Codex reading, ranking falls back to provider tokens")
+    }
+
     // MARK: - The usage predicates the dual label gates on
 
     func testProviderUsagePredicates() {

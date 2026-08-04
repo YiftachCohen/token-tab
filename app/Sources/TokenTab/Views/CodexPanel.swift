@@ -21,14 +21,14 @@ struct CodexPanel: View {
     private var snapshot: Snapshot { store.snapshot }
     private var accent: Color { Theme.indigo }
 
-    // The Codex hero is % LEFT of the official 5h limit. Codex is only ever focused when it
-    // has usage, and usage implies a rate-limits snapshot, so these are populated here — but
-    // we fail soft to an "idle" read if a snapshot is somehow absent.
-    private var usedPct: Int? { snapshot.codexUsedPct(now: now) }
-    private var leftPct: Int? { snapshot.codexLeftPct(now: now) }
+    // The Codex hero is % LEFT of the official 5h limit, or the weekly allowance when that
+    // is the only window OpenAI emitted. We fail soft to an "idle" read when no current
+    // official window is available.
+    private var leftPct: Int? { snapshot.codexDisplayLeftPct(now: now) }
     private var heroFraction: Double { Double(leftPct ?? 0) / 100 }
     private var stale: Bool { snapshot.codexStale(now: now) }
-    private var resetAt: Date? { snapshot.codexPrimary?.resetAt }
+    private var displayWindow: ProviderWindow? { snapshot.codexDisplayWindow }
+    private var resetAt: Date? { displayWindow?.resetAt }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -71,7 +71,7 @@ struct CodexPanel: View {
             .padding(.horizontal, 17).padding(.top, 16)
 
             // THIS WEEK — the official weekly window as a secondary mini bar.
-            if let wk = snapshot.codexWeeklyUsedPct(now: now) {
+            if snapshot.codexPrimary != nil, let wk = snapshot.codexWeeklyUsedPct(now: now) {
                 Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 6) {
@@ -121,15 +121,17 @@ struct CodexPanel: View {
     /// rather than promise a reset that already happened — otherwise the panel reads as an
     /// active quota with a mysteriously blank number.
     private var interpretation: String {
-        guard let resetAt else { return "official 5-hour limit" }
-        return snapshot.codexWindowExpired(now: now)
-            ? "official 5-hour limit · window reset at \(Fmt.clock(resetAt))"
-            : "official 5-hour limit · resets \(Fmt.clock(resetAt))"
+        let limit = displayWindow?.period == "weekly" ? "official weekly limit" : "official 5-hour limit"
+        guard let resetAt else { return limit }
+        let reset = Fmt.resetLabel(resetAt, relativeTo: now)
+        return snapshot.codexDisplayWindowExpired(now: now)
+            ? "\(limit) · window reset at \(reset)"
+            : "\(limit) · resets \(reset)"
     }
 
     private var weeklyResetText: String {
         guard let r = snapshot.codexSecondary?.resetAt else { return "" }
-        return "· resets \(Fmt.clock(r))"
+        return "· resets \(Fmt.resetLabel(r, relativeTo: now))"
     }
 
     /// The unpriced bucket is combined across providers; only flag "Codex models unpriced"

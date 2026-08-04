@@ -39,9 +39,11 @@ shown — averaging two unrelated quotas would be inventing a number.
 
 - **Codex's percentage is official, Claude's is inferred.** The Codex hero is the same
   ring, but its number comes from the `rate_limits` snapshot OpenAI's CLI writes into its
-  own logs (5-hour primary, weekly secondary) rather than from a locally reconstructed
-  window. Under the ring: the reset time, a weekly mini bar, and the day's per-model
-  tokens. When the snapshot is older than ~10 minutes an "as of HH:MM" line appears, so a
+  own logs rather than from a locally reconstructed window. Windows are classified by
+  their declared duration (5-hour or weekly), because a weekly-only allowance can occupy
+  the raw `primary` slot. Under the ring: the reset day/time, a weekly mini bar when both
+  windows exist, and the day's per-model tokens. When the snapshot is older than ~10
+  minutes an "as of HH:MM" line appears, so a
   stale reading never reads as a live one.
 - **Codex dollars are partial, deliberately.** Every OpenAI id with a published rate is
   in the table (the `gpt-5.6` Sol/Terra/Luna tier, `gpt-5.5`, the `gpt-5.4` family, the
