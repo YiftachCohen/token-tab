@@ -9,6 +9,18 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-08-04
+
+### Fixed
+- **Weekly-only Codex rate limits no longer render as a false 5h gauge.** Codex can emit
+  a weekly-only allowance in `rate_limits.primary`. Both engines now key
+  `providers.codex.windows` off `window_minutes` (300 = 5h, 10080 = weekly) instead of the
+  raw slot, so a weekly reading no longer masquerades as 5h pressure or competes with
+  Claude's 5h percentage in the menu bar. Reset labels (CLI, SwiftBar, and the app) now
+  gain day context when the reset isn't today, so a Saturday 18:19 weekly reset no longer
+  reads as an already-passed 18:19 today. **No trust-surface change** — same fields parsed,
+  same read-only access. Pinned by `test/fixtures/parity/codex-weekly-only-primary-slot.json`.
+
 ## [0.3.1] — 2026-08-02
 
 ### Fixed
