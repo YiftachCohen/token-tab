@@ -38,6 +38,10 @@ xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 
+# Rendered shots (produced by TOKENTAB_SHOTS=1 swift test --filter ShotsTests). Scratch
+# output — promote the ones you actually want into docs/screenshots/ and commit those.
+docs/screenshots/generated/
+
 # Conductor workspace scratch (also excluded locally via .git/info/exclude)
 .context/
 .gstack/

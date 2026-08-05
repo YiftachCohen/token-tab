@@ -38,10 +38,23 @@ struct DropdownView: View {
     @ObservedObject var helper: LiveHelperManager
     /// Settings (cap + live) live behind the gear so they're reachable in EVERY mode — the
     /// burn/API/Bedrock panel has no quota gauge to host them inline.
-    @State private var showSettings = false
+    @State private var showSettings: Bool
     /// Overview ↔ History, the design's tab switcher. Shared across both modes; the header
     /// and footer sit outside it so only the body swaps.
-    @State private var tab: PanelTab = .overview
+    @State private var tab: PanelTab
+
+    /// The defaults reproduce the shipped behavior exactly (Overview, settings closed) — the
+    /// app never passes these. They exist because this view OWNS which tab is open, so the
+    /// headless shot renderer (Tests/TokenTabAppTests/Shots) has no other way to photograph
+    /// History or Settings short of synthesizing a click on a SwiftUI button.
+    init(store: UsageStore, access: AccessManager, helper: LiveHelperManager,
+         initialTab: PanelTab = .overview, initialSettings: Bool = false) {
+        self.store = store
+        self.access = access
+        self.helper = helper
+        _tab = State(initialValue: initialTab)
+        _showSettings = State(initialValue: initialSettings)
+    }
 
     var body: some View {
         Group {
