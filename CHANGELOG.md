@@ -9,6 +9,32 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-08-05
+
+### Fixed
+- **A weekly-only Codex reading is a percentage again in the menu bar.** 0.3.2 correctly
+  re-keyed the Codex windows by duration, but the menu-bar label still read the 5h-only
+  window while the dropdown's Codex panel and secondary row had moved to the displayed one.
+  On any Mac whose Codex emits a weekly-only allowance — the current OpenAI shape — the bar
+  fell through to a raw token count while the panel one click away showed a percentage for
+  the same provider. Codex's own pair in the bar now shows whichever official window Codex
+  published (5h when there is one, else weekly). The single max-pressure headline stays
+  5h-only, so a weekly percentage still never competes with Claude's 5h percentage.
+- **A menu-bar figure can no longer be truncated to `92…`.** The status item's width is what
+  gives the hosted label its width, so a stale width didn't render as a narrow item — SwiftUI
+  resolved the shortfall by truncating a figure, silently costing a number its percent sign.
+  0.3.2 could sit at a one-pair width while rendering a two-pair label indefinitely, because
+  the only trigger to re-measure was a store update, which fires before the label has actually
+  changed. The re-measure is now driven by the label's own size changing, the width is measured
+  from the label's ideal size rather than the width the item currently allows, and the label
+  can no longer be compressed at all.
+- **Codex's "as of" staleness caption gains day context**, matching the reset labels 0.3.2
+  fixed: against a weekly window a reading can be days old and still describe the open window,
+  so a bare "as of 21:15" read as fifteen minutes ago when it was Saturday.
+
+**No trust-surface change** — same entitlements, same parsed fields, same read-only access,
+no network. Display-only changes in the native app; the CLI and SwiftBar output is untouched.
+
 ## [0.3.2] — 2026-08-04
 
 ### Fixed
