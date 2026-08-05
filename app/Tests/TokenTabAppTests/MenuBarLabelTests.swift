@@ -238,6 +238,48 @@ final class MenuBarLabelTests: XCTestCase {
                        "without a 5h Codex reading, ranking falls back to provider tokens")
     }
 
+    /// …and the bar must SHOW that weekly reading in Codex's own pair. Its slot is Codex's own,
+    /// not a comparison, so the rule there is the panel's: display whichever official window
+    /// Codex published. Reading only the 5h window here is what put a token count in the menu
+    /// bar of every Mac whose Codex emits a weekly-only allowance — the current OpenAI shape —
+    /// while the dropdown one click away showed a percentage for the same provider.
+    func testWeeklyOnlyCodexStillReadsAsAPercentInItsOwnPair() {
+        var snap = snapshot(claudeToday: 20_000_000, windowTokens: 3_000_000, cap: 10_000_000,
+                            windowActive: true, codexToday: 9_000_000)
+        snap.agg.providers["codex"]?.windows["secondary"] =
+            ProviderWindow(source: "official", period: "weekly",
+                           resetAt: now.addingTimeInterval(6 * 24 * 3600),
+                           usedPct: 57, windowMinutes: 10080)
+
+        let l = label(snap)
+        XCTAssertTrue(l.showsBoth)
+        XCTAssertEqual(l.claudeFigure, "70%")
+        XCTAssertEqual(l.codexFigure, "43%", "the weekly reading, as % left — not 9.0M")
+        XCTAssertEqual(l.codexGlyph.size.width, 13, "a real official % ⇒ the indigo ring")
+
+        // An expired weekly window is still not a percentage: same rule as the 5h one.
+        var stale = snap
+        stale.agg.providers["codex"]?.windows["secondary"] =
+            ProviderWindow(source: "official", period: "weekly",
+                           resetAt: now.addingTimeInterval(-60), usedPct: 57, windowMinutes: 10080)
+        XCTAssertEqual(label(stale).codexFigure, "9.0M")
+        XCTAssertEqual(label(stale).codexGlyph.size.width, 8)
+    }
+
+    /// The single max-pressure figure is a COMPARISON against Claude's 5h %, so a weekly-only
+    /// Codex must not headline it with a percentage — that boundary is the 2026-08-02 DESIGN.md
+    /// row, and it is also what keeps this label and the SwiftBar one telling the same Mac the
+    /// same thing.
+    func testWeeklyOnlyCodexNeverHeadlinesTheSingleLabel() {
+        var snap = snapshot(claudeToday: 1_000_000, codexToday: 9_000_000)
+        snap.agg.today = 10_000_000
+        snap.agg.providers["codex"]?.windows["secondary"] =
+            ProviderWindow(source: "official", period: "weekly",
+                           resetAt: now.addingTimeInterval(6 * 24 * 3600),
+                           usedPct: 57, windowMinutes: 10080)
+        XCTAssertEqual(label(snap, scope: .headline).text, "10.0M")
+    }
+
     // MARK: - The usage predicates the dual label gates on
 
     func testProviderUsagePredicates() {
