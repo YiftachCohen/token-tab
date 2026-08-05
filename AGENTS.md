@@ -85,6 +85,34 @@ re-runs the audit + design lint automatically after any edit to `src/`, `app/Sou
 or `package.json`, so violations surface at edit time — but run the suite yourself
 before pushing anyway.
 
+## Screenshots
+
+Product images are **rendered, never screenshotted**:
+
+```sh
+TOKENTAB_SHOTS=1 swift test --package-path app --filter ShotsTests   # → docs/screenshots/generated/
+```
+
+`app/Tests/TokenTabAppTests/Shots/` hosts the real `DropdownView` in an offscreen window over
+a procedural wallpaper and captures it — so the glass, the open beat and every number are the
+actual shipping views, driven by staged `Snapshot` fixtures rather than the author's `~/.claude`
+(a real snapshot leaks project names and can't be re-shot identically after a redesign). Add a
+scene to `ShotsTests.scenes()`; add its data to `ShotFixtures`. Skips unless `TOKENTAB_SHOTS=1`,
+so CI and a plain `swift test` are unaffected.
+
+Output is gitignored: promote the keepers by hand, as `.webp` so the repo doesn't carry ~400 KB
+PNGs (the README's five images cost ~45 KB each this way).
+
+```sh
+cwebp -q 90 -m 6 docs/screenshots/generated/hero-subscription-dark.png \
+  -o docs/screenshots/menubar-overview.webp
+```
+
+Two constraints worth knowing before changing it: `ImageRenderer` is NOT usable here (it
+flattens `.thinMaterial` into a grey slab and never fires `onAppear`, freezing every gauge at
+0), and capture resolution is the window's backing scale — 2x on a Retina Mac, i.e. exactly
+what a Retina screenshot yields.
+
 The design lint is a ratchet: literals that predate it are listed in
 `.github/scripts/design-lint-baseline.txt` (each is a migration TODO — move it into
 `Theme.swift` and delete its line). Never add to the baseline.

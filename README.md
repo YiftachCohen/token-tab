@@ -13,11 +13,15 @@
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-2ea44f.svg)](package.json)
 
 <p align="center">
-  <img src="docs/screenshots/menubar-overview.webp" alt="Token Tab in the macOS menu bar — the dropdown shows 91% of the 5-hour window left, an exact reset countdown, and today's tokens by model" width="344">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/menubar-overview-light.webp">
+    <img src="docs/screenshots/menubar-overview.webp" alt="Token Tab in the macOS menu bar — the dropdown shows 57% of the 5-hour window left, an exact reset countdown, and today's tokens by model" width="360">
+  </picture>
 </p>
 <p align="center">
-  <img src="docs/screenshots/history.webp" alt="History panel — daily token bars for the last 14 days with the period total and delta vs the previous period" width="322">
-  <img src="docs/screenshots/bedrock-burn.webp" alt="Bedrock mode — burned-today dollar estimate, burn rate per hour, and per-model cost breakdown" width="329">
+  <img src="docs/screenshots/bedrock-burn.webp" alt="Bedrock mode — burned-today dollar estimate, burn rate per hour, and per-model cost share" width="275">
+  <img src="docs/screenshots/codex-dual.webp" alt="Codex mode — OpenAI's official 5-hour limit as the hero gauge, the weekly allowance below it, and Claude's window as a secondary row" width="275">
+  <img src="docs/screenshots/history.webp" alt="History panel — daily token bars for the last 14 days with the period total and delta vs the previous period" width="275">
 </p>
 
 Token Tab shows your Claude Code token usage in the macOS menu bar. It reads the logs
@@ -337,6 +341,11 @@ filesystem); `src/pricing.mjs` is the pure price table + cost math, injected int
 parser so the rates stay testable; `src/token-tab.mjs` is the thin I/O shell. The Swift
 port in `app/Sources/TokenTabCore` is kept in deliberate parity — see
 [`AGENTS.md`](AGENTS.md).
+
+The screenshots above are **rendered, not screenshotted** — the real `DropdownView` hosted
+offscreen over staged fixture data (`TOKENTAB_SHOTS=1 swift test --package-path app --filter
+ShotsTests`). Every pixel is the shipping view, and no image here is a photograph of anyone's
+actual `~/.claude`.
 
 Contributions are welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the
 trust invariants and the two-engine parity rule. Found a way to defeat the
