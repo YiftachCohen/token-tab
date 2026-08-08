@@ -85,6 +85,31 @@ re-runs the audit + design lint automatically after any edit to `src/`, `app/Sou
 or `package.json`, so violations surface at edit time — but run the suite yourself
 before pushing anyway.
 
+## Bug hunt
+
+Everything above is a *regression* check: it proves the behavior we already pinned still
+holds. `.claude/workflows/bug-hunt.js` is the other half — a Claude Code workflow that goes
+looking for behavior nobody has pinned yet.
+
+```
+Workflow({name: "bug-hunt"})                        # whole repo, ~34 agents
+Workflow({name: "bug-hunt", args: {depth: "quick"}})  # ~15 agents
+Workflow({name: "bug-hunt", args: {depth: "deep"}})   # ~68 agents, two rounds
+Workflow({name: "bug-hunt", args: {scope: "diff"}})   # only what this branch changed vs main
+```
+
+Seven finders hunt one dimension each — JS↔Swift divergence, aggregation/window math,
+pricing, the trust invariants a regex can't see, timezone/DST, file IO and the CLI, and
+fixtures that prove less than they claim. Every finding is then handed to independent
+verifiers that try to *reproduce* it and to *refute* it, and only a majority survives; the
+hunt is read-only, so scratch repros go outside the repo. It reports what it dropped at the
+cap and ends with a critic on what went unexamined.
+
+It is a hunting tool, not a gate: it does not run in CI, and its findings are candidates to
+confirm, not a to-do list. Anything it finds in the two cores almost certainly needs the
+AGENTS.md parity treatment — fix both engines, add a shared fixture under
+`test/fixtures/parity/`.
+
 ## Screenshots
 
 Product images are **rendered, never screenshotted**:
