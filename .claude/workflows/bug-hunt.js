@@ -151,8 +151,13 @@ is the worst thing this product can do, and a trust-invariant break is worse sti
   name, or a rate that matches JS↔Swift but is the wrong number in both).
 - Style, naming, formatting, comment wording, or "I would have structured this differently".
 - Design-system deviations — DESIGN.md compliance is a separate lint, not this hunt.
+`
 
-## Output
+// Finder-only. This MUST NOT reach the triage agent: on the first real run it did,
+// and triage applied the five-finding cap to its own merged report, demoting a
+// confirmed bug into prose. Caps belong on input, never on the report.
+const FINDER_OUTPUT_RULES = `
+## Your output
 
 Every finding needs file, 1-indexed line, the triggering input, the wrong output, and the right
 answer. No line number you have not actually read. Report at most 5 findings; if you have more,
@@ -427,6 +432,14 @@ deliberate behavior in AGENTS.md, CLAUDE.md, a source comment, or a test that pi
 behavior on purpose; a misread of the code; a line number that does not say what they claim it
 says (go read it); the CI audit already catching it; or the "not a bug" list in the rules above.
 
+Refuting takes POSITIVE evidence — a specific line that guards the input, dead-ends the branch,
+or documents the behavior as intended. "I checked one path and it was fine" is not a refutation.
+A real bug was once killed here by a refuter who checked the environment-variable path and never
+checked the config-file path feeding the same value. So: enumerate every path the reporter's
+trigger could take, and if you could not rule them all out — or could not run the code at all,
+e.g. no Swift toolchain — set holds=true, with low confidence, and name the path you could not
+reach. Inability to check is not evidence of absence.
+
 Set holds=true only if you tried hard and could not kill it. Cite the specific lines either way.
 
 Claimed bug: ${f.title}
@@ -511,7 +524,7 @@ ${round > 1 ? `This is hunting round ${round}.` : ''}
 
 ${d.prompt}
 ${BRIEF}${seen}
-${GROUND_RULES}`,
+${GROUND_RULES}${FINDER_OUTPUT_RULES}`,
         { label: `hunt:${d.key}${round > 1 ? `:r${round}` : ''}`, phase: 'Hunt', schema: FINDINGS_SCHEMA },
       ),
     (res, d) => {
@@ -628,7 +641,8 @@ Do this:
 2. Open every cited file:line and CONFIRM it says what the finding claims. Drop anything that
    does not survive your own read, and say in the summary how many you dropped and why.
 3. Rank by consequence to the number on the user's menu bar. A trust-invariant break outranks
-   everything.
+   everything. There is NO cap on how many bugs you report: every surviving bug gets its own
+   entry in \`bugs\`. Never demote one into the summary prose to keep the list short.
 4. For each bug write: what breaks and what the user sees; a repro concrete enough to paste into
    test/core.test.mjs or a parity fixture; and the fix. Set breaksParity=true when the fix must
    be mirrored into the other engine — for anything in the two cores, it almost always must be,
