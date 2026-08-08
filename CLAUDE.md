@@ -1,9 +1,10 @@
 # Token Tab
 
-A provably-safe Claude Code usage meter for the macOS menu bar. Reads local
-`~/.claude` logs, makes no network calls, keeps none of your content. See
-`README.md` for the trust model and architecture (JS engine + Swift port behind
-CLI / SwiftBar / native app front-ends).
+Claude Code and Codex usage in the macOS menu bar. Reads the local `~/.claude`
+(and `~/.codex`) logs; nothing leaves your machine — no network calls, no
+content read, and every claim is verifiable. See `README.md` for the trust
+model and architecture (JS engine + Swift port behind CLI / SwiftBar / native
+app front-ends).
 
 ## Working rules (trust invariants, two-engine parity, rate checklist)
 @AGENTS.md

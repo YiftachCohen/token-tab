@@ -4,7 +4,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "A provably-safe AI usage meter for the macOS menu bar. Reads local Claude Code logs, makes no network calls, keeps none of your content.",
+  "description": "Claude Code and Codex usage in the macOS menu bar. Reads the local logs; nothing leaves your machine — no network calls, no content read, and you can verify both.",
   "type": "module",
   "license": "MIT",
   "repository": {

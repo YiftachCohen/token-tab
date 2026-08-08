@@ -1,6 +1,6 @@
 # Security Policy
 
-Token Tab's entire pitch is that it *provably can't* leak your data: no network
+Token Tab's entire pitch is that it *verifiably can't* leak your data: no network
 code, no runtime dependencies, no reads of message content, and a sandboxed
 native app with no network entitlement. A security report here is any evidence
 that one of those claims doesn't hold.
