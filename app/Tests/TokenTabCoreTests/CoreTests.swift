@@ -354,4 +354,28 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(weekly.contains("Sat"), "a future weekly reset must identify its day: \(weekly)")
         XCTAssertTrue(weekly.contains("18:19"), "the reset label still includes its clock: \(weekly)")
     }
+
+    /// Twin of test/core.test.mjs "thisWeek: week start survives a midnight DST jump".
+    /// Deliberately NOT a shared parity fixture: the fixtures pin calendar-day fields only
+    /// where they are timezone-independent, and this case is the opposite of that — it only
+    /// means anything in a zone whose clocks jump forward AT midnight.
+    ///
+    /// `aggregate` builds its calendar from `.current`, so the zone has to be overridden at
+    /// the process level; NSTimeZone.default is what TimeZone.current reads.
+    func testWeekStartSurvivesMidnightDST() {
+        let saved = NSTimeZone.default
+        // Asia/Beirut springs forward 00:00 -> 01:00 on 2026-03-29, so that day has no 00:00.
+        NSTimeZone.default = TimeZone(identifier: "Asia/Beirut")!
+        defer { NSTimeZone.default = saved }
+
+        // "now" is Sun 2026-03-29 12:00 local, so the Monday-based week began Mon 2026-03-23.
+        let now = date("2026-03-29T09:00:00Z")
+        // Mon 2026-03-23 00:30 local — inside that week, but before the 01:00 that the old
+        // wall-clock-carrying implementation used as the week start.
+        let firstHour = rec(messageId: "w", requestId: "1", usage: u(1000, 0, 0, 0),
+                            timestamp: "2026-03-22T22:30:00Z")
+        let a = aggregate([firstHour], options: AggregateOptions(now: now, weekStartsOn: 1))
+        XCTAssertEqual(a.thisWeek, 1000, "the week's first hour must not fall outside the week")
+        XCTAssertEqual(a.total, 1000)
+    }
 }

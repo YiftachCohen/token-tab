@@ -131,6 +131,22 @@ struct SegmentedToggle: View {
 }
 
 /// Which tab the dropdown is showing — the design's "Overview | History" switcher.
+/// Which provider a per-model figure belongs to, inferred from the model id.
+///
+/// The daily history buckets are keyed by model id and carry no provider field, so a panel
+/// that must show ONE provider's models has only the id to go on. This is a display-layer
+/// heuristic, deliberately not in TokenTabCore: the engines route by the record's `provider`,
+/// and duplicating that as an id-shape guess inside a core would be a parity liability.
+///
+/// Shared so the panels cannot drift — HistoryPanel's per-provider scope and BurnPanel's
+/// receipt have to agree on which rows are Claude's.
+enum ModelScope {
+    static func isCodex(_ base: String) -> Bool {
+        let id = base.lowercased()
+        return id.contains("codex") || id.hasPrefix("gpt")
+    }
+}
+
 enum PanelTab: Hashable { case overview, history }
 
 /// The "Overview | History" tab switcher under the header. A raised white chip marks the

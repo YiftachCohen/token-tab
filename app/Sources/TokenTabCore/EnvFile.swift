@@ -9,10 +9,12 @@
 public enum EnvFile {
     public static func parse(_ text: String) -> [String: String] {
         var values: [String: String] = [:]
-        // Split on any newline (\r, \n, \r\n) so a CRLF file yields clean lines with no
+        // Split on ASCII newlines (\r, \n, \r\n) so a CRLF file yields clean lines with no
         // trailing \r — otherwise Int("400000000\r") is nil and "bedrock\r" matches no case.
-        for line in text.split(whereSeparator: \.isNewline) {
-            let s = String(line)
+        // NOT `\.isNewline`, which is true for U+0085/U+2028/U+2029 as well: a value that
+        // legitimately contained one would be cut in half, and the JS parser (a `\r?\n` split)
+        // would keep it whole. Same rule as the log readers — see JSONLText.
+        for s in JSONLText.lines(text) {
             guard let eq = s.firstIndex(of: "=") else { continue }
             let key = s[..<eq].trimmingCharacters(in: .whitespaces)
             guard key.hasPrefix("TOKENTAB_") || key == "CLAUDE_CODE_USE_BEDROCK" else { continue }
