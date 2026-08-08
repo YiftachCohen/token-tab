@@ -53,10 +53,9 @@ struct HistoryPanel: View {
 
     /// Is this a Codex model id? (gpt-*/codex-* — the pragmatic per-provider filter, since
     /// the daily series carries model ids, not a provider tag; see design §6.)
-    private static func isCodexModel(_ base: String) -> Bool {
-        let id = base.lowercased()
-        return id.contains("codex") || id.hasPrefix("gpt")
-    }
+    /// One shared implementation in `ModelScope` so this panel and BurnPanel's receipt
+    /// can't disagree about which rows belong to which provider.
+    private static func isCodexModel(_ base: String) -> Bool { ModelScope.isCodex(base) }
 
     /// The daily series, filtered to the active scope by model id. `.all` is the untouched
     /// combined series; a single-provider scope re-buckets each day to that provider's models.

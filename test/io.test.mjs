@@ -371,3 +371,42 @@ test("--swiftbar: falls back to combined today-tokens when neither provider has 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A raw U+2028 / U+2029 / U+0085 inside a log line is ONE line to Node's readline (whose
+// delimiters are `\r?\n|\r(?!\n)`), and `JSON.stringify` emits all three unescaped — so a
+// turn quoting a file that contains one produces exactly this shape. Pinned here because
+// the Swift reader used Foundation line-breaking, whose delimiter set includes all three:
+// it cut this single record into truncated fragments, none of which decode, and the tokens
+// silently vanished from the app while this CLI counted them. Swift twin:
+// IOLayerTests.testParseFileTreatsUnicodeSeparatorsAsLineContent.
+test("--json: a record containing U+2028/U+2029/U+0085 stays ONE record", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tokentab-sep-"));
+  const text = "before\u2028after\u0085tail\u2029end";
+  const line = JSON.stringify({
+    type: "assistant", requestId: "rsep", timestamp: "2026-06-20T10:00:01Z",
+    message: { id: "msep", model: "claude-sonnet-4-5", content: [{ type: "text", text }],
+               usage: { input_tokens: 1000, cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 5000, output_tokens: 200 } },
+  });
+  assert.ok(!line.includes("\n"), "the fixture must be a single physical line");
+  assert.ok(line.includes("\u2028"), "JSON.stringify must emit the separator RAW, not escaped");
+  writeFileSync(join(dir, "sep.jsonl"), line + "\n");
+  const out = JSON.parse(await cli(["--json"], dir));
+  assert.equal(out.total, 6200, "1000 + 5000 + 200 — the whole record counts");
+  assert.equal(out.dedup.counted, 1, "one record, not several fragments");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// A stray non-UTF-8 byte (a half-written multi-byte character at the tail of a live log)
+// must cost at most its own line, never the whole file. Swift twin:
+// IOLayerTests.testParseFileSurvivesInvalidUTF8.
+test("--json: an invalid UTF-8 byte does not discard the rest of the file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tokentab-utf8-"));
+  const good = `{"type":"assistant","requestId":"rg","timestamp":"2026-06-20T10:00:01Z","message":{"id":"mg","model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":500,"output_tokens":0}}}`;
+  writeFileSync(join(dir, "bad.jsonl"),
+    Buffer.concat([Buffer.from(good + "\n", "utf8"), Buffer.from([0xff, 0xfe, 0x0a])]));
+  const out = JSON.parse(await cli(["--json"], dir));
+  assert.equal(out.total, 1500, "the good record survives a damaged neighbour");
+  assert.equal(out.dedup.counted, 1);
+  rmSync(dir, { recursive: true, force: true });
+});

@@ -429,7 +429,13 @@ private func startOfLocalWeek(_ now: Date, weekStartsOn: Int, _ cal: Calendar) -
     let weekday = cal.component(.weekday, from: startOfDay) // 1 = Sunday
     let zeroBased = weekday - 1
     let diff = (zeroBased - weekStartsOn + 7) % 7
-    return cal.date(byAdding: .day, value: -diff, to: startOfDay) ?? startOfDay
+    let shifted = cal.date(byAdding: .day, value: -diff, to: startOfDay) ?? startOfDay
+    // Re-take the start of day after shifting. `date(byAdding: .day)` preserves the
+    // wall-clock time, so in a zone that springs forward AT midnight today's startOfDay is
+    // already 01:00 and that hour rides along to a week-start day whose midnight exists —
+    // beginning the week at 01:00 and dropping that day's first hour from thisWeek. Mirrors
+    // the same fix in src/core.mjs startOfLocalWeek (parity fixture: week-start-dst.json).
+    return cal.startOfDay(for: shifted)
 }
 
 // MARK: - aggregate()

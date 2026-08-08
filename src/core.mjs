@@ -67,8 +67,15 @@ function localDayKey(d) {
 function startOfLocalWeek(now, weekStartsOn /* 0=Sun,1=Mon */) {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const diff = (d.getDay() - weekStartsOn + 7) % 7;
-  d.setDate(d.getDate() - diff);
-  return d;
+  // Re-derive local midnight of the target DAY instead of shifting this Date back `diff`
+  // days. `setDate` preserves the wall-clock time, and in a zone that springs forward AT
+  // midnight (Asia/Beirut, America/Santiago, Asia/Damascus, Asia/Amman, Asia/Hebron —
+  // ~5 zones, twice a year) today's "midnight" is already 01:00, which would then be
+  // carried onto a week-start day whose midnight does exist. The week would begin at
+  // 01:00 and silently drop that day's first hour from thisWeek and cost.thisWeek.
+  // The constructor normalizes an out-of-range day, and yields the first valid instant
+  // of that local day — which is what "start of the week" means.
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
 }
 
 

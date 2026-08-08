@@ -169,3 +169,25 @@ test("rolling-5h window is absolute half-open (now-5h, now] — TZ independent",
   assert.equal(a.rolling5h, 65, "only the record inside 5h counts toward rolling window");
   assert.equal(a.total, 130, "both still in all-time total");
 });
+
+// The week must start at the true first instant of its start day, even in a zone whose
+// clocks jump forward AT midnight — see startOfLocalWeek in src/core.mjs. Not a shared
+// parity fixture: the fixtures pin calendar fields only where they are timezone-
+// independent, and this case is the opposite of that. Its Swift twin is
+// CoreTests.testWeekStartSurvivesMidnightDST.
+test("thisWeek: week start survives a midnight DST jump (Asia/Beirut)", () => {
+  const saved = process.env.TZ;
+  process.env.TZ = "Asia/Beirut"; // springs forward 00:00 -> 01:00 on 2026-03-29
+  try {
+    // "now" is Sun 2026-03-29 12:00 local, so the Monday-based week began Mon 2026-03-23.
+    const now = new Date("2026-03-29T09:00:00Z");
+    // Mon 2026-03-23 00:30 local — inside that week, but before the 01:00 that the old
+    // wall-clock-carrying implementation used as the week start.
+    const firstHour = rec({ messageId: "w", requestId: "1", timestamp: "2026-03-22T22:30:00Z", usage: u(1000, 0, 0, 0) });
+    const a = aggregate([firstHour], { now, weekStartsOn: 1 });
+    assert.equal(a.thisWeek, 1000, "the week's first hour must not fall outside the week");
+    assert.equal(a.total, 1000);
+  } finally {
+    if (saved === undefined) delete process.env.TZ; else process.env.TZ = saved;
+  }
+});

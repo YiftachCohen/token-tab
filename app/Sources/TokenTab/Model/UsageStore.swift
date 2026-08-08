@@ -488,7 +488,25 @@ final class UsageStore: ObservableObject {
                                          lastUpdated: now, cap: cap, live: live, history: history)
                 // Learn the cap from a fresh live reading (cap ≈ tokens / sessionPct) so a real
                 // % survives once live goes stale. Takes effect on the next refresh's cap.
+                //
+                // The live % and the token count must describe the SAME 5h block. `isFresh`
+                // alone does not establish that: the helper runs every 300s and the TTL is
+                // 360s, so for minutes after a block rolls over, a PRE-reset percentage is
+                // still "fresh" while agg.window.tokens has already restarted from ~0. Divide
+                // the new block's tokens by the old block's 85% and the learned cap comes out
+                // an order of magnitude too small — it is then persisted, makes tokenPct
+                // exceed 100, and pins the menu bar to a red 0% with most of the quota
+                // untouched. It does not self-heal either: the next honest reading is below
+                // calibrateCap's minPct floor, so it declines to correct it.
+                //
+                // So require the reading to have been captured at or after the current block
+                // began (resetAt - blockSeconds). A reading from the previous block is simply
+                // not evidence about this one.
                 if let l = live, l.isFresh(now: now), let p = l.sessionPct,
+                   agg.window.active,
+                   let captured = l.capturedAt,
+                   let resetAt = agg.window.resetAt,
+                   captured >= resetAt.addingTimeInterval(-agg.window.blockSeconds),
                    let learned = calibrateCap(windowTokens: agg.window.tokens, sessionPct: p),
                    learned != self.calibratedCap {
                     self.calibratedCap = learned

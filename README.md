@@ -55,11 +55,41 @@ The point of Token Tab is that it has no way to leak anything. Each claim is ver
   for Codex logs: `token_count` usage totals, `rate_limits`, the `turn_context` model,
   and the `session_meta` id. Neither ever touches message content (your prompts, code,
   and responses).
-- **No state.** No cache, no telemetry, nothing written.
+- **No telemetry, and nothing of yours written.** The CLI writes nothing at all. The
+  native app keeps local state — described below — but none of it is your content, and
+  none of it leaves the machine (it can't; there's no network entitlement).
+
+<details>
+<summary>What the app stores locally</summary>
+
+Reading the whole log history on every launch took seconds, so the app keeps a cache and
+remembers your settings. All of it is inside the app's own sandbox container, and all of
+it is disposable — delete it and the app rebuilds it:
+
+- **A record cache**, at `~/Library/Containers/com.tokentab.TokenTab/Data/Library/Caches/TokenTab/record-cache-v2.json`.
+  Keyed by each log file's absolute path + mtime + size, holding the same token metadata
+  the parser decodes (model id, token counts, timestamps) so an unchanged file is never
+  re-read. It contains **file paths and numbers, never message content** — the cached type
+  is the same `UsageRecord` the parser produces, which has no field for your text. Note
+  that the paths are Claude Code's project directory names, which encode the directories
+  you work in.
+- **Your settings**, in `UserDefaults`: the menu-bar metric and scope, whether Codex is
+  enabled, a manual window cap, the cap learned from a live reading, and a display-mode
+  override.
+- **A security-scoped bookmark** for the log folder you granted access to — that grant is
+  what the sandbox requires to re-open the folder on the next launch.
+
+To clear all of it: delete `~/Library/Containers/com.tokentab.TokenTab`.
+
+The opt-in live reader (`adapters/`, off by default) additionally writes the parsed
+`/usage` percentages to a cache file next to your logs — the only write outside the
+container, and the reason that path is fenced outside the audited core.
+
+</details>
 
 What it can't claim is to be *blind* to your data. Any usage meter has to read the
 logs, and those logs contain your prompts. The narrower guarantee holds: it reads the
-numbers, sends nothing, stores nothing.
+numbers, sends nothing, and keeps nothing but the numbers.
 
 ### Audit it yourself
 
