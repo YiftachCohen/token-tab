@@ -60,6 +60,60 @@ final class LiveHelperManager: ObservableObject {
         }
     }
 
+    /// Re-bind an already-enabled registration to THIS copy of the app. Called once at
+    /// launch.
+    ///
+    /// launchd's record names a specific bundle, not a bundle id. Install a new version
+    /// and drag the old copy to the Trash and the record goes on naming the binned one —
+    /// and macOS will not execute code that lives in the Trash (the very same bundle runs
+    /// fine from anywhere else; it's the location, not the signature, which still verifies
+    /// and staples). So launchd retries the helper every StartInterval, is refused every
+    /// time, and macOS puts up "Token Tab Not Opened … Move to Trash" on a five-minute
+    /// loop. That dialog's button cannot help — the copy is already in the Trash — and
+    /// `status` still reads `.enabled` here, so nothing in the UI ties the nag back to us.
+    ///
+    /// register() re-points the record at the running copy, so healing that is usually just
+    /// registering again — measured on macOS 26.6: called with the service already
+    /// `.enabled` and the record naming a binned copy, it returned success and moved the
+    /// record's URL to the running bundle (launchd bumped its generation to prove it).
+    ///
+    /// That isn't guaranteed everywhere: a release may instead refuse a register() that
+    /// lands on a standing registration (`kSMErrorAlreadyRegistered`), which would leave
+    /// the stale bundle in place. So the refusal is caught rather than discarded, and
+    /// answered with Apple's guidance — unregister, wait for launchd to finish, then take
+    /// the registration again. Whatever the outcome, it is never silent: a failure lands
+    /// in `lastError`.
+    ///
+    /// Guarded on `.enabled` throughout, so it can never switch the helper back on for
+    /// someone who turned it off in Login Items, nor strip an approval that is mid-flight.
+    func healRegistration() {
+        guard hasBundledAgent, service.status == .enabled else { return }
+        do {
+            try service.register()
+            refresh()
+        } catch {
+            // Only worth the heavier dance if a registration is genuinely still standing;
+            // for any other failure, unregistering could throw away a working one.
+            guard service.status == .enabled else {
+                lastError = error.localizedDescription
+                refresh()
+                return
+            }
+            service.unregister { [weak self] unregisterError in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let unregisterError {
+                        self.lastError = unregisterError.localizedDescription
+                    } else {
+                        do { try self.service.register() }
+                        catch { self.lastError = error.localizedDescription }
+                    }
+                    self.refresh()
+                }
+            }
+        }
+    }
+
     /// Register / unregister the agent. On success launchd starts the helper right away
     /// (RunAtLoad), the first cache write lands in the granted folder within seconds, and
     /// the FSEvents watcher picks it up — no extra plumbing needed here.
