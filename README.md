@@ -24,7 +24,7 @@
   <img src="docs/screenshots/history.webp" alt="History panel — daily token bars for the last 14 days with the period total and delta vs the previous period" width="275">
 </p>
 
-Token Tab shows your Claude Code token usage in the macOS menu bar. It reads the logs
+Token Tab shows your Claude Code and Codex token usage in the macOS menu bar. It reads the logs
 Claude Code already writes to `~/.claude` — and, if you use OpenAI's Codex CLI, the
 session logs it writes to `~/.codex` — no API keys, no keychain, no network calls.
 It reads token counts off disk and shows them; nothing leaves your machine.
