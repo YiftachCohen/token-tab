@@ -434,7 +434,9 @@ private func startOfLocalWeek(_ now: Date, weekStartsOn: Int, _ cal: Calendar) -
     // wall-clock time, so in a zone that springs forward AT midnight today's startOfDay is
     // already 01:00 and that hour rides along to a week-start day whose midnight exists —
     // beginning the week at 01:00 and dropping that day's first hour from thisWeek. Mirrors
-    // the same fix in src/core.mjs startOfLocalWeek (parity fixture: week-start-dst.json).
+    // the same fix in src/core.mjs startOfLocalWeek. Deliberately not a shared parity
+    // fixture — the case is timezone-dependent by definition; the twin tests are
+    // CoreTests.testWeekStartSurvivesMidnightDST and its core.test.mjs counterpart.
     return cal.startOfDay(for: shifted)
 }
 

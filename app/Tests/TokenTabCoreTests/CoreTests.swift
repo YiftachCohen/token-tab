@@ -361,12 +361,21 @@ final class CoreTests: XCTestCase {
     /// means anything in a zone whose clocks jump forward AT midnight.
     ///
     /// `aggregate` builds its calendar from `.current`, so the zone has to be overridden at
-    /// the process level; NSTimeZone.default is what TimeZone.current reads.
+    /// the process level. Assigning `NSTimeZone.default` does NOT do that — under
+    /// swift-foundation `TimeZone.current` reads the cached system zone and ignores it, so
+    /// that idiom leaves the test running in the machine's own zone, passing everywhere and
+    /// proving nothing. Setting TZ and resetting the cache is what actually moves it.
     func testWeekStartSurvivesMidnightDST() {
-        let saved = NSTimeZone.default
         // Asia/Beirut springs forward 00:00 -> 01:00 on 2026-03-29, so that day has no 00:00.
-        NSTimeZone.default = TimeZone(identifier: "Asia/Beirut")!
-        defer { NSTimeZone.default = saved }
+        let saved = getenv("TZ").map { String(cString: $0) }
+        setenv("TZ", "Asia/Beirut", 1)
+        NSTimeZone.resetSystemTimeZone()
+        defer {
+            if let saved { setenv("TZ", saved, 1) } else { unsetenv("TZ") }
+            NSTimeZone.resetSystemTimeZone()
+        }
+        XCTAssertEqual(TimeZone.current.identifier, "Asia/Beirut",
+                       "the zone override is the whole test — without it this proves nothing")
 
         // "now" is Sun 2026-03-29 12:00 local, so the Monday-based week began Mon 2026-03-23.
         let now = date("2026-03-29T09:00:00Z")
