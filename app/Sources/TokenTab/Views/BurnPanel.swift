@@ -26,12 +26,15 @@ struct BurnPanel: View {
     /// The "easy" line: project the day's spend from today-so-far plus the last hour's rate
     /// run to local midnight. Shown only while actually burning (a live-ish rate), so it never
     /// invents a forecast from a cold meter.
+    /// Claude's own, for the same reason `claudeToday` is: this projection sits under a
+    /// Claude hero and is stated in the same dollars the hero shows.
     private var pacePrediction: String? {
-        guard let cost = agg.cost, cost.lastHour > 0 else { return nil }
+        let rate = snapshot.claudeCostLastHour
+        guard rate > 0 else { return nil }
         let cal = Calendar.current
         let dayEnd = cal.startOfDay(for: now).addingTimeInterval(24 * 3600)
         let hoursLeft = max(0, dayEnd.timeIntervalSince(now) / 3600)
-        let projected = cost.today + cost.lastHour * hoursLeft
+        let projected = snapshot.claudeCostToday + rate * hoursLeft
         return "On pace for ~\(Fmt.usd(projected)) today"
     }
 
@@ -66,7 +69,7 @@ struct BurnPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     SectionLabel(text: "BURN RATE")
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(Fmt.millions(agg.lastHourTokens)).font(Theme.figure(14))
+                        Text(Fmt.millions(snapshot.claudeLastHourTokens)).font(Theme.figure(14))
                             .foregroundStyle(Theme.ink)
                         Text("tok/hr").font(.system(size: 11)).foregroundStyle(Theme.muted)
                     }
@@ -74,7 +77,7 @@ struct BurnPanel: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     SectionLabel(text: "≈ COST / HR")
-                    Text(Fmt.usd(agg.cost?.lastHour ?? 0)).font(Theme.figure(14))
+                    Text(Fmt.usd(snapshot.claudeCostLastHour)).font(Theme.figure(14))
                         .foregroundStyle(Theme.amber)
                 }
             }

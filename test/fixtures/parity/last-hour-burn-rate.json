@@ -1,0 +1,60 @@
+{
+  "name": "last hour (burn rate) -> combined lastHourTokens vs each provider's own lastHour",
+  "_comment": "The burn-rate window, which is what every 'tok/hr' and '$/hr' figure and both pace projections are built on. Codex traffic in the trailing hour is 300000 tokens / $1.75 of the combined 720000 / $3.25 — so a panel under a Claude heading that reads the combined figure overstates Claude's pace by 71%. providers.claude.lastHour (420000 / $1.50) is the only honest source for it. Also pins the half-open (now-1h, now] boundary: the record stamped EXACTLY one hour before `now` is excluded, matching rolling5h's rule in both engines. today/thisWeek/cost.today are deliberately unpinned — the records sit on the local-calendar boundary of `now`, so they are timezone-dependent; every field pinned here is pure elapsed time.",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "c1", "requestId": "cr1", "model": "claude-sonnet-5",
+      "usage": { "input_tokens": 400000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 20000 },
+      "timestamp": "2026-05-31T23:30:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "codex:sess-1", "requestId": "token:0", "model": "gpt-5.2-codex", "provider": "codex",
+      "usage": { "input_tokens": 200000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 100000 },
+      "timestamp": "2026-05-31T23:40:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "c2", "requestId": "cr2", "model": "claude-sonnet-5",
+      "usage": { "input_tokens": 100000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-05-31T23:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "c3", "requestId": "cr3", "model": "claude-sonnet-5",
+      "usage": { "input_tokens": 50000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0 },
+      "timestamp": "2026-05-31T21:30:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 870000,
+    "rolling5h": 870000,
+    "lastHourTokens": 720000,
+    "byClass": { "input": 750000, "cacheCreate": 0, "cacheRead": 0, "output": 120000 },
+    "bySurface": { "subscription": 570000, "codex": 300000 },
+    "byModel": { "claude-sonnet-5": 570000, "gpt-5.2-codex": 300000 },
+    "window": { "active": true, "tokens": 570000, "calibratedCap": 0, "resetMs": 1780281000000, "pct": null },
+    "cost": {
+      "total": 3.7,
+      "lastHour": 3.25,
+      "byModel": { "claude-sonnet-5": 1.95, "gpt-5.2-codex": 1.75 },
+      "unpricedTokens": 0
+    },
+    "providerOrder": ["claude", "codex"],
+    "providers": {
+      "claude": {
+        "total": 570000, "rolling5h": 570000, "lastHour": 420000,
+        "byClass": { "input": 550000, "cacheCreate": 0, "cacheRead": 0, "output": 20000 },
+        "byModel": { "claude-sonnet-5": 570000 },
+        "bySurface": { "subscription": 570000 },
+        "cost": { "total": 1.95, "rolling5h": 1.95, "lastHour": 1.5 }
+      },
+      "codex": {
+        "total": 300000, "rolling5h": 300000, "lastHour": 300000,
+        "byClass": { "input": 200000, "cacheCreate": 0, "cacheRead": 0, "output": 100000 },
+        "byModel": { "gpt-5.2-codex": 300000 },
+        "bySurface": { "codex": 300000 },
+        "cost": { "total": 1.75, "rolling5h": 1.75, "lastHour": 1.75 }
+      }
+    }
+  }
+}

@@ -109,6 +109,19 @@ struct Snapshot {
         agg.providers["claude"]?.cost?.today ?? agg.cost?.today ?? 0
     }
 
+    /// Claude's OWN burn rate — tokens in the trailing hour. `agg.lastHourTokens` is every
+    /// provider's traffic added together, so a busy Codex hour reads as Claude pace: it
+    /// inflates the "tok/hr" trend, and (worse) the projections built on it, which measure
+    /// that rate against Claude's own 5h cap. Same legacy fallback as `claudeCostToday`.
+    var claudeLastHourTokens: Int {
+        agg.providers["claude"]?.lastHour ?? agg.lastHourTokens
+    }
+
+    /// Claude's OWN dollars-per-hour, the $ twin of `claudeLastHourTokens`.
+    var claudeCostLastHour: Double {
+        agg.providers["claude"]?.cost?.lastHour ?? agg.cost?.lastHour ?? 0
+    }
+
     /// Both providers have usage, so a dual menu-bar label has two real figures to put up.
     /// When this is false, `.both` renders exactly the single headline label it always did.
     var bothProvidersHaveUsage: Bool { claudeHasUsage && codexHasUsage }

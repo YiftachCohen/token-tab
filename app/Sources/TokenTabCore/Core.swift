@@ -285,6 +285,8 @@ public struct ProviderCost: Sendable {
     public var today: Double = 0
     public var thisWeek: Double = 0
     public var rolling5h: Double = 0
+    /// Dollars in the trailing hour — this provider's own $/hr burn rate.
+    public var lastHour: Double = 0
 
     public init() {}
 }
@@ -297,6 +299,9 @@ public struct ProviderSubtotal: Sendable {
     public var total = 0
     public var thisWeek = 0
     public var rolling5h = 0
+    /// Tokens in the trailing hour — this provider's own burn rate (the combined
+    /// `Aggregate.lastHourTokens` is every provider's traffic added together).
+    public var lastHour = 0
     public var byClass = TokenUsage()
     public var byModel: [String: Int] = [:]
     public var bySurface: [Surface: Int] = [:]
@@ -594,7 +599,10 @@ public func aggregate(_ records: [UsageRecord],
                 }
                 if tms >= weekStart { agg.thisWeek += sum; providerBuckets[provider]!.thisWeek += sum }
                 if tms > rollingCutoff { agg.rolling5h += sum; providerBuckets[provider]!.rolling5h += sum }
-                if tms > hourCutoff { agg.lastHourTokens += sum }
+                if tms > hourCutoff {
+                    agg.lastHourTokens += sum
+                    providerBuckets[provider]!.lastHour += sum
+                }
                 if priced {
                     if dayKey == todayKey {
                         costSummary.today += usd
@@ -608,7 +616,10 @@ public func aggregate(_ records: [UsageRecord],
                         costSummary.rolling5h += usd
                         providerBuckets[provider]!.cost?.rolling5h += usd
                     }
-                    if tms > hourCutoff { costSummary.lastHour += usd }
+                    if tms > hourCutoff {
+                        costSummary.lastHour += usd
+                        providerBuckets[provider]!.cost?.lastHour += usd
+                    }
                 }
                 if provider == "claude" { stamps.append((tms, sum)) }
             }
