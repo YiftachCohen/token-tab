@@ -60,6 +60,27 @@ final class LiveHelperManager: ObservableObject {
         }
     }
 
+    /// Re-bind an already-enabled registration to THIS copy of the app. Called once at
+    /// launch.
+    ///
+    /// launchd's record names a specific bundle, not a bundle id. Install a new version
+    /// and drag the old copy to the Trash and the record goes on naming the binned one —
+    /// and macOS will not execute code that lives in the Trash (the very same bundle runs
+    /// fine from anywhere else; it's the location, not the signature, which still verifies
+    /// and staples). So launchd retries the helper every StartInterval, is refused every
+    /// time, and macOS puts up "Token Tab Not Opened … Move to Trash" on a five-minute
+    /// loop. That dialog's button cannot help — the copy is already in the Trash — and
+    /// `status` still reads `.enabled` here, so nothing in the UI ties the nag back to us.
+    ///
+    /// register() re-points the record at the running copy, so healing that is just
+    /// registering again. Guarded on `.enabled`, so it can never switch the helper back on
+    /// for someone who turned it off in Login Items.
+    func healRegistration() {
+        guard hasBundledAgent, service.status == .enabled else { return }
+        try? service.register()
+        refresh()
+    }
+
     /// Register / unregister the agent. On success launchd starts the helper right away
     /// (RunAtLoad), the first cache write lands in the granted folder within seconds, and
     /// the FSEvents watcher picks it up — no extra plumbing needed here.

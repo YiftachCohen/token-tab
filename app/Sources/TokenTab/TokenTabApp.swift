@@ -49,5 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = controller
         access.bootstrap()
         store.start()   // timer no-ops harmlessly until access is granted
+        // Re-point an enabled Live % registration at this copy of the app, in case a
+        // previous one still owns it (see LiveHelperManager.healRegistration).
+        helper.healRegistration()
     }
 }

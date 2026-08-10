@@ -142,6 +142,38 @@ and only once you turn it on:
 That's the whole setup. API and Bedrock (pay-per-token) users don't see this step —
 there's no server quota to fetch, so the app just shows the burn panel.
 
+### Uninstalling
+
+Delete the app (or `brew uninstall --cask token-tab`) — but if you turned Live % on,
+**turn it off first**, in the dropdown's live row or Settings, or by removing "Token Tab"
+under **System Settings ▸ General ▸ Login Items & Extensions**.
+
+The registration launchd holds names one specific copy of the bundle, not a bundle id, and
+deleting the app doesn't retract it. Leave it on and drag the app to the Trash, and launchd
+goes on trying to start the helper inside the trashed copy every five minutes — and macOS
+puts up *"Token Tab" Not Opened — Apple could not verify …* on a loop. That panel's **Move
+to Trash** button can't fix it (the app is already in the Trash), so the dialog just comes
+back.
+
+Nothing is wrong with the signature when this happens: the trashed copy is still validly
+signed and its notarization ticket still staples (`spctl -a` accepts it). macOS just won't
+execute code that lives in the Trash — copy the very same bundle anywhere else and its
+binaries run again. launchd goes on naming the copy you binned, so every retry walks into
+that refusal, and the helper is held at `exec` until something kills it.
+
+Upgrading is not affected: replacing the app in place (`brew upgrade`, or dropping a new
+build over the old one) leaves the registration pointing at a bundle that still exists in a
+runnable location, so the helper keeps working. It's specifically *binning* a copy that
+still owns the registration that starts the loop.
+
+If you're already in that loop: switch the item off under **Login Items & Extensions**,
+then empty the Trash. Launching a current Token Tab also clears it — the app re-points an
+enabled registration at itself on launch, so upgrading and binning the old copy heals
+rather than nags.
+
+Two files outlive the app either way, both harmless and deletable by hand:
+`<logDir>/.token-tab-live.json` (the live cache) and `~/Library/Logs/token-tab-live.log`.
+
 ## Other front-ends (power users)
 
 The JS engine also drives a CLI and a SwiftBar plugin, for people who'd rather not run
