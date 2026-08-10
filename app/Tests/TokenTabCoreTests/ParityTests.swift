@@ -131,6 +131,7 @@ final class ParityTests: XCTestCase {
         if let v = e["today"] as? Int { XCTAssertEqual(agg.today, v, "today \(ctx)") }
         if let v = e["thisWeek"] as? Int { XCTAssertEqual(agg.thisWeek, v, "thisWeek \(ctx)") }
         if let v = e["rolling5h"] as? Int { XCTAssertEqual(agg.rolling5h, v, "rolling5h \(ctx)") }
+        if let v = e["lastHourTokens"] as? Int { XCTAssertEqual(agg.lastHourTokens, v, "lastHourTokens \(ctx)") }
 
         if let bc = e["byClass"] as? [String: Any] {
             if let v = bc["input"] as? Int { XCTAssertEqual(agg.byClass.input, v, "byClass.input \(ctx)") }
@@ -178,6 +179,7 @@ final class ParityTests: XCTestCase {
             if let aggCost = agg.cost {
                 if let v = cost["total"] as? Double { XCTAssertEqual(aggCost.total, v, accuracy: 1e-9, "cost.total \(ctx)") }
                 if let v = cost["today"] as? Double { XCTAssertEqual(aggCost.today, v, accuracy: 1e-9, "cost.today \(ctx)") }
+                if let v = cost["lastHour"] as? Double { XCTAssertEqual(aggCost.lastHour, v, accuracy: 1e-9, "cost.lastHour \(ctx)") }
                 if let v = cost["unpricedTokens"] as? Int { XCTAssertEqual(aggCost.unpricedTokens, v, "cost.unpricedTokens \(ctx)") }
                 if let bm = cost["byModel"] as? [String: Any] {
                     var expected: [String: Double] = [:]
@@ -204,6 +206,7 @@ final class ParityTests: XCTestCase {
                 if let v = ep["total"] as? Int { XCTAssertEqual(pb.total, v, "providers.\(p).total \(ctx)") }
                 if let v = ep["thisWeek"] as? Int { XCTAssertEqual(pb.thisWeek, v, "providers.\(p).thisWeek \(ctx)") }
                 if let v = ep["rolling5h"] as? Int { XCTAssertEqual(pb.rolling5h, v, "providers.\(p).rolling5h \(ctx)") }
+                if let v = ep["lastHour"] as? Int { XCTAssertEqual(pb.lastHour, v, "providers.\(p).lastHour \(ctx)") }
 
                 if let bc = ep["byClass"] as? [String: Any] {
                     if let v = bc["input"] as? Int { XCTAssertEqual(pb.byClass.input, v, "providers.\(p).byClass.input \(ctx)") }
@@ -238,6 +241,7 @@ final class ParityTests: XCTestCase {
                     if let v = ec["today"] as? Double { XCTAssertEqual(pc.today, v, accuracy: 1e-9, "providers.\(p).cost.today \(ctx)") }
                     if let v = ec["thisWeek"] as? Double { XCTAssertEqual(pc.thisWeek, v, accuracy: 1e-9, "providers.\(p).cost.thisWeek \(ctx)") }
                     if let v = ec["rolling5h"] as? Double { XCTAssertEqual(pc.rolling5h, v, accuracy: 1e-9, "providers.\(p).cost.rolling5h \(ctx)") }
+                    if let v = ec["lastHour"] as? Double { XCTAssertEqual(pc.lastHour, v, accuracy: 1e-9, "providers.\(p).cost.lastHour \(ctx)") }
                 }
 
                 if let windowsExpect = ep["windows"] as? [String: Any] {

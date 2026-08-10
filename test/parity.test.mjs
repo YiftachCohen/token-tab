@@ -35,7 +35,7 @@ for (const file of files) {
     const e = fx.expect;
 
     // Whole-token scalars (assert only the ones this fixture pins).
-    for (const k of ["total", "today", "thisWeek", "rolling5h"]) {
+    for (const k of ["total", "today", "thisWeek", "rolling5h", "lastHourTokens"]) {
       if (k in e) assert.equal(a[k], e[k], k);
     }
 
@@ -72,7 +72,7 @@ for (const file of files) {
         const pb = a.providers[p];
         assert.ok(pb, `providers.${p} present`);
         const ep = e.providers[p];
-        for (const k of ["today", "total", "thisWeek", "rolling5h"]) {
+        for (const k of ["today", "total", "thisWeek", "rolling5h", "lastHour"]) {
           if (k in ep) assert.equal(pb[k], ep[k], `providers.${p}.${k}`);
         }
         if (ep.byClass) {
@@ -90,7 +90,7 @@ for (const file of files) {
         // the only honest source for a figure a UI labels with one provider's name.
         if (ep.cost) {
           assert.ok(pb.cost, `providers.${p}.cost present (a cost fn was injected)`);
-          for (const k of ["total", "today", "thisWeek", "rolling5h"]) {
+          for (const k of ["total", "today", "thisWeek", "rolling5h", "lastHour"]) {
             if (k in ep.cost)
               assert.ok(
                 approx(pb.cost[k], ep.cost[k]),
@@ -131,6 +131,7 @@ for (const file of files) {
       assert.ok(a.cost, "cost block present (a cost fn was injected)");
       if ("total" in c) assert.ok(approx(a.cost.total, c.total), `cost.total ${a.cost.total} != ${c.total}`);
       if ("today" in c) assert.ok(approx(a.cost.today, c.today), `cost.today ${a.cost.today} != ${c.today}`);
+      if ("lastHour" in c) assert.ok(approx(a.cost.lastHour, c.lastHour), `cost.lastHour ${a.cost.lastHour} != ${c.lastHour}`);
       if ("unpricedTokens" in c) assert.equal(a.cost.unpriced.tokens, c.unpricedTokens, "cost.unpricedTokens");
       if (c.byModel) {
         assert.deepEqual(
