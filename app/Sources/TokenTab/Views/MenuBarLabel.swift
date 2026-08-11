@@ -109,12 +109,12 @@ struct MenuBarLabel: View {
             if let q = snapshot.quotaLeft(now: now) { return "\(q.pct)%" }
             let w = snapshot.agg.window
             if w.active { return Fmt.durationCompact(w.secondsToReset(now: now)) }
-            let today = snapshot.agg.providers["claude"]?.today ?? snapshot.agg.today
+            let today = snapshot.claudeToday
             return today > 0 ? Fmt.abbrev(today) : "—"
         case .burn:
             switch menuMetric {
             case .cost:   return Fmt.usd(snapshot.claudeCostToday)
-            case .tokens: return Fmt.abbrev(snapshot.agg.providers["claude"]?.today ?? snapshot.agg.today)
+            case .tokens: return Fmt.abbrev(snapshot.claudeToday)
             }
         }
     }

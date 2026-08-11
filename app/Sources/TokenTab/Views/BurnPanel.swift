@@ -19,9 +19,8 @@ struct BurnPanel: View {
     /// 2026-07-31 rule is that a figure the UI labels as one provider's must be sourced from
     /// that provider's records alone. Reading `agg.today` here billed Codex's tokens to
     /// Claude's "BURNED TODAY" hero — while MenuBarLabel, which already scopes correctly,
-    /// showed the real number one click away. Falls back to the combined value for a legacy
-    /// aggregate with no provider buckets, the way `claudeHasUsage` does.
-    private var claudeToday: Int { agg.providers["claude"]?.today ?? agg.today }
+    /// showed the real number one click away.
+    private var claudeToday: Int { snapshot.claudeToday }
 
     /// The "easy" line: project the day's spend from today-so-far plus the last hour's rate
     /// run to local midnight. Shown only while actually burning (a live-ish rate), so it never

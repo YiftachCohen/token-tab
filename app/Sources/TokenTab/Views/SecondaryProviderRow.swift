@@ -65,7 +65,7 @@ struct SecondaryProviderRow: View {
             return Fmt.abbrev(snapshot.codex?.today ?? 0)
         case .claude:
             if let q = snapshot.quotaLeft(now: now) { return "\(q.pct)%" }
-            return Fmt.abbrev(snapshot.agg.providers["claude"]?.today ?? snapshot.agg.today)
+            return Fmt.abbrev(snapshot.claudeToday)
         }
     }
 
@@ -87,7 +87,7 @@ struct SecondaryProviderRow: View {
                 let w = snapshot.agg.window
                 return w.active ? "5h window · resets \(Fmt.clock(w.resetAt))" : "no active window"
             }
-            return "\(Fmt.abbrev(snapshot.agg.providers["claude"]?.today ?? snapshot.agg.today)) today"
+            return "\(Fmt.abbrev(snapshot.claudeToday)) today"
         }
     }
 }
