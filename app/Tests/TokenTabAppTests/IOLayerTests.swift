@@ -232,4 +232,53 @@ final class IOLayerTests: XCTestCase {
         XCTAssertEqual(cache.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1"],
                        "a corrupt store is discarded and the logs are parsed fresh")
     }
+
+    // MARK: - Line breaking and byte-level tolerance
+
+    /// A raw U+2028 / U+2029 / U+0085 inside a log line is line CONTENT, not a line break.
+    ///
+    /// `JSON.stringify` emits all three unescaped, so any assistant turn quoting a file that
+    /// contains one (minified JS, exported JSON) writes exactly this shape: one physical line.
+    /// Foundation's `enumerateLines` breaks on all three, so the reader used to cut this record
+    /// into truncated fragments, fail to decode every one, and drop the tokens entirely — while
+    /// the CLI, which splits the way Node's readline does, counted them. Same Mac, two answers.
+    /// Twin of test/io.test.mjs "a record containing U+2028/U+2029/U+0085 stays ONE record".
+    func testParseFileTreatsUnicodeSeparatorsAsLineContent() throws {
+        let ls = "\u{2028}", ps = "\u{2029}", nel = "\u{0085}"
+        let text = "before\(ls)after\(nel)tail\(ps)end"
+        let line = #"{"type":"assistant","requestId":"rsep","timestamp":"2026-06-20T10:00:01Z","message":{"id":"msep","model":"claude-sonnet-4-5","content":"\#(text)","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":5000,"output_tokens":200}}}"#
+        // Written as ONE line — the separators are inside the JSON string, not between records.
+        let url = dir.appendingPathComponent("sep.jsonl")
+        try (line + "\n").write(to: url, atomically: true, encoding: .utf8)
+
+        let (records, malformed) = LogReader.parseFile(url)
+        XCTAssertEqual(records.count, 1, "one physical line is one record, not several fragments")
+        XCTAssertEqual(malformed, 0, "no fragment may be reported as malformed")
+        XCTAssertEqual(records.first?.usage.sum, 6200, "1000 + 5000 + 200 — the whole record counts")
+    }
+
+    /// The same rule for the dotfile parser, which used `\.isNewline` (the same over-broad
+    /// Unicode set): a value containing one of those scalars must not be cut in half.
+    func testEnvFileSplitsOnASCIINewlinesOnly() {
+        let parsed = EnvFile.parse("TOKENTAB_MODE=bed\u{2028}rock\nTOKENTAB_WINDOW_CAP=400000\r\n")
+        XCTAssertEqual(parsed["TOKENTAB_MODE"], "bed\u{2028}rock", "a U+2028 is value content, not a line break")
+        XCTAssertEqual(parsed["TOKENTAB_WINDOW_CAP"], "400000", "CRLF still yields a clean value")
+    }
+
+    /// A stray non-UTF-8 byte — e.g. a half-written multi-byte character at the tail of a log
+    /// being appended to right now — must cost at most its own line. A strict `String(data:
+    /// encoding:)` returned nil for the whole file, so the reader silently discarded every good
+    /// record in it AND counted nothing malformed: whole-history loss with no signal.
+    /// Twin of test/io.test.mjs "an invalid UTF-8 byte does not discard the rest of the file".
+    func testParseFileSurvivesInvalidUTF8() throws {
+        let url = dir.appendingPathComponent("bad.jsonl")
+        var data = Data()
+        data.append(Data((assistantLine(id: "mg", req: "rg", usage: (1000, 0, 500, 0)) + "\n").utf8))
+        data.append(contentsOf: [0xFF, 0xFE, 0x0A])   // invalid UTF-8, own line
+        try data.write(to: url)
+
+        let (records, _) = LogReader.parseFile(url)
+        XCTAssertEqual(records.count, 1, "the good record survives a damaged neighbour")
+        XCTAssertEqual(records.first?.usage.sum, 1500)
+    }
 }

@@ -14,15 +14,26 @@ struct BurnPanel: View {
 
     private var agg: Aggregate { snapshot.agg }
 
+    /// Claude's own tokens, not the combined all-provider total. DropdownView renders this
+    /// panel only in `case .claude` (Codex has its own section below it), and DESIGN.md's
+    /// 2026-07-31 rule is that a figure the UI labels as one provider's must be sourced from
+    /// that provider's records alone. Reading `agg.today` here billed Codex's tokens to
+    /// Claude's "BURNED TODAY" hero — while MenuBarLabel, which already scopes correctly,
+    /// showed the real number one click away.
+    private var claudeToday: Int { snapshot.claudeToday }
+
     /// The "easy" line: project the day's spend from today-so-far plus the last hour's rate
     /// run to local midnight. Shown only while actually burning (a live-ish rate), so it never
     /// invents a forecast from a cold meter.
+    /// Claude's own, for the same reason `claudeToday` is: this projection sits under a
+    /// Claude hero and is stated in the same dollars the hero shows.
     private var pacePrediction: String? {
-        guard let cost = agg.cost, cost.lastHour > 0 else { return nil }
+        let rate = snapshot.claudeCostLastHour
+        guard rate > 0 else { return nil }
         let cal = Calendar.current
         let dayEnd = cal.startOfDay(for: now).addingTimeInterval(24 * 3600)
         let hoursLeft = max(0, dayEnd.timeIntervalSince(now) / 3600)
-        let projected = cost.today + cost.lastHour * hoursLeft
+        let projected = snapshot.claudeCostToday + rate * hoursLeft
         return "On pace for ~\(Fmt.usd(projected)) today"
     }
 
@@ -32,14 +43,14 @@ struct BurnPanel: View {
             VStack(alignment: .leading, spacing: 0) {
                 SectionLabel(text: "BURNED TODAY")
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    AnimatedNumber(target: agg.cost?.today ?? 0,
+                    AnimatedNumber(target: snapshot.claudeCostToday,
                                    font: Theme.hero(40, weight: .bold),
                                    tracking: Theme.tightTracking(40),
                                    color: Theme.ink) { Fmt.usd($0) }
                     Text("est.").font(.system(size: 13)).foregroundStyle(Theme.muted)
                 }
                 .padding(.top, 6)
-                Text("\(Fmt.grouped(agg.today)) ")
+                Text("\(Fmt.grouped(claudeToday)) ")
                     .font(Theme.mono(14)) +
                 Text("tokens").font(Theme.mono(14)).foregroundColor(Theme.muted)
             }
@@ -57,7 +68,7 @@ struct BurnPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     SectionLabel(text: "BURN RATE")
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(Fmt.millions(agg.lastHourTokens)).font(Theme.figure(14))
+                        Text(Fmt.millions(snapshot.claudeLastHourTokens)).font(Theme.figure(14))
                             .foregroundStyle(Theme.ink)
                         Text("tok/hr").font(.system(size: 11)).foregroundStyle(Theme.muted)
                     }
@@ -65,7 +76,7 @@ struct BurnPanel: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     SectionLabel(text: "≈ COST / HR")
-                    Text(Fmt.usd(agg.cost?.lastHour ?? 0)).font(Theme.figure(14))
+                    Text(Fmt.usd(snapshot.claudeCostLastHour)).font(Theme.figure(14))
                         .foregroundStyle(Theme.amber)
                 }
             }
@@ -101,9 +112,14 @@ struct BurnPanel: View {
     /// Today's spend per model, from the History series' last (today) bucket, sorted by $
     /// (ties by tokens). The hero is "BURNED TODAY", so this breakdown is today too — and it
     /// reuses the already-computed per-day model maps, so Core stays untouched.
+    ///
+    /// Codex model rows are filtered out: this receipt sits under a Claude hero, and an
+    /// unfiltered bucket put a raw `gpt-5.3-codex` line inside it. Same `ModelScope` filter
+    /// HistoryPanel uses for its per-provider scope.
     private var todayByModel: [ModelSpend] {
         guard let today = snapshot.history.last else { return [] }
         var keys = Set(today.costByModel.keys); keys.formUnion(today.tokensByModel.keys)
+        keys = keys.filter { !ModelScope.isCodex($0) }
         return keys.map { k in
             ModelSpend(name: prettyModel(k),
                        tokens: today.tokensByModel[k] ?? 0,

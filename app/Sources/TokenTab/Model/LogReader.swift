@@ -11,12 +11,18 @@ import TokenTabCore
 enum LogReader {
     /// Log-dir resolution mirrors token-tab.mjs:
     ///   $TOKENTAB_LOG_DIR  >  $CLAUDE_CONFIG_DIR/projects  >  ~/.claude/projects
+    ///
+    /// Read via `Config.string`, not the raw environment, so the env/dotfile precedence
+    /// matches the JS engine — which resolves these through loadLocalConfig(). A sandboxed
+    /// GUI app inherits no shell env, so reading `ProcessInfo` alone meant a relocated
+    /// TOKENTAB_LOG_DIR set in ~/.config/token-tab/env moved the CLI and not the app: same
+    /// Mac, same setting, one reads the logs and the other reports zero. CodexLogReader
+    /// .defaultCodexRoot() has always gone through Config; this is the Claude-side twin.
     static func defaultLogDir() -> URL {
-        let env = ProcessInfo.processInfo.environment
-        if let d = env["TOKENTAB_LOG_DIR"], !d.isEmpty {
+        if let d = Config.string("TOKENTAB_LOG_DIR"), !d.isEmpty {
             return URL(fileURLWithPath: (d as NSString).expandingTildeInPath)
         }
-        if let c = env["CLAUDE_CONFIG_DIR"], !c.isEmpty {
+        if let c = Config.string("CLAUDE_CONFIG_DIR"), !c.isEmpty {
             return URL(fileURLWithPath: (c as NSString).expandingTildeInPath).appendingPathComponent("projects")
         }
         return FileManager.default.homeDirectoryForCurrentUser
@@ -99,20 +105,28 @@ enum LogReader {
     /// Parse one JSONL file into usage records (+ a count of malformed lines). The per-file
     /// unit shared by the one-shot `readRecords` and the cached refresh path. A vanished or
     /// unreadable file is simply empty (tolerated mid-walk).
+    /// Decoding is LOSSY on purpose (`String(decoding:as:)` substitutes U+FFFD rather than
+    /// returning nil): a strict decode of a file with one bad byte returned ([], 0), throwing
+    /// away every good record in it AND counting nothing malformed — a whole file of history
+    /// gone with no signal. A half-written multi-byte character at the tail of a live log is
+    /// enough to trigger it. Now only the damaged line fails to decode, and it is counted.
+    /// Node substitutes U+FFFD the same way, so the two engines agree on the surviving lines.
     static func parseFile(_ url: URL) -> (records: [UsageRecord], malformed: Int) {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else { return ([], 0) }
+        guard let data = try? Data(contentsOf: url) else { return ([], 0) }
+        let text = String(decoding: data, as: UTF8.self)
         var records: [UsageRecord] = []
         var malformed = 0
         let decoder = JSONDecoder()
-        text.enumerateLines { rawLine, _ in
+        // JSONLText.lines, not enumerateLines — see JSONLText for why Foundation's line
+        // breaking silently drops records the JS engine counts.
+        for rawLine in JSONLText.lines(text) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty { return }
-            guard let lineData = line.data(using: .utf8) else { malformed += 1; return }
+            if line.isEmpty { continue }
+            guard let lineData = line.data(using: .utf8) else { malformed += 1; continue }
             guard let obj = try? decoder.decode(Line.self, from: lineData) else {
-                malformed += 1; return // tolerate a half-written live line
+                malformed += 1; continue // tolerate a half-written live line
             }
-            guard obj.type == "assistant", let m = obj.message, let u = m.usage else { return }
+            guard obj.type == "assistant", let m = obj.message, let u = m.usage else { continue }
             let usage = TokenUsage(
                 input: u.input_tokens ?? 0,
                 cacheCreate: u.cache_creation_input_tokens ?? 0,

@@ -55,6 +55,7 @@ export function classifySurface(model, provider) {
 }
 
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
 
 function localDayKey(d) {
   // YYYY-MM-DD in LOCAL time (logs are UTC; "today" must mean the user's day).
@@ -67,8 +68,15 @@ function localDayKey(d) {
 function startOfLocalWeek(now, weekStartsOn /* 0=Sun,1=Mon */) {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const diff = (d.getDay() - weekStartsOn + 7) % 7;
-  d.setDate(d.getDate() - diff);
-  return d;
+  // Re-derive local midnight of the target DAY instead of shifting this Date back `diff`
+  // days. `setDate` preserves the wall-clock time, and in a zone that springs forward AT
+  // midnight (Asia/Beirut, America/Santiago, Asia/Damascus, Asia/Amman, Asia/Hebron —
+  // ~5 zones, twice a year) today's "midnight" is already 01:00, which would then be
+  // carried onto a week-start day whose midnight does exist. The week would begin at
+  // 01:00 and silently drop that day's first hour from thisWeek and cost.thisWeek.
+  // The constructor normalizes an out-of-range day, and yields the first valid instant
+  // of that local day — which is what "start of the week" means.
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
 }
 
 
@@ -97,6 +105,9 @@ export function aggregate(records, opts = {}) {
   const todayKey = localDayKey(now);
   const weekStart = startOfLocalWeek(now, weekStartsOn).getTime();
   const rollingCutoff = now.getTime() - FIVE_HOURS_MS;
+  // The trailing hour — the burn-rate basis (tokens/hr, $/hr and the pace projections
+  // built on them). Half-open (now-1h, now], the same shape as rolling5h.
+  const hourCutoff = now.getTime() - ONE_HOUR_MS;
 
   // Pass 1 — dedup with KEEP-LAST resolution.
   // Key = `${messageId}:${requestId}` when BOTH exist; otherwise a unique key (so a
@@ -133,6 +144,7 @@ export function aggregate(records, opts = {}) {
   let today = 0;
   let thisWeek = 0;
   let rolling5h = 0;
+  let lastHourTokens = 0;
   let counted = 0;
   let untrackedTokens = 0;
   let untrackedRequests = 0;
@@ -143,6 +155,7 @@ export function aggregate(records, opts = {}) {
   let costToday = 0;
   let costWeek = 0;
   let costRolling = 0;
+  let costLastHour = 0;
   const costByModel = {};
   let unpricedTokens = 0;
   let unpricedRequests = 0;
@@ -167,13 +180,14 @@ export function aggregate(records, opts = {}) {
         today: 0,
         thisWeek: 0,
         rolling5h: 0,
+        lastHour: 0,
         byClass: { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 },
         byModel: {},
         bySurface: {},
         // Dollars scoped to this provider (populated only when opts.cost is supplied).
         // The combined cost.* block is every provider's spend added together; a UI that
         // labels a figure "Claude" needs Claude's own, or a priced Codex record inflates it.
-        cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0 },
+        cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0, lastHour: 0 },
       };
       providerBuckets.set(p, b);
       providerOrder.push(p);
@@ -238,10 +252,12 @@ export function aggregate(records, opts = {}) {
         if (isToday) { today += sum; pb.today += sum; }
         if (tms >= weekStart) { thisWeek += sum; pb.thisWeek += sum; }
         if (tms > rollingCutoff) { rolling5h += sum; pb.rolling5h += sum; }
+        if (tms > hourCutoff) { lastHourTokens += sum; pb.lastHour += sum; }
         if (priced) {
           if (isToday) { costToday += usd; pb.cost.today += usd; }
           if (tms >= weekStart) { costWeek += usd; pb.cost.thisWeek += usd; }
           if (tms > rollingCutoff) { costRolling += usd; pb.cost.rolling5h += usd; }
+          if (tms > hourCutoff) { costLastHour += usd; pb.cost.lastHour += usd; }
         }
         if (provider === "claude") stamps.push({ t: tms, sum });
       }
@@ -300,6 +316,7 @@ export function aggregate(records, opts = {}) {
       total: pb.total,
       thisWeek: pb.thisWeek,
       rolling5h: pb.rolling5h,
+      lastHour: pb.lastHour,
       byClass: pb.byClass,
       byModel: pb.byModel,
       bySurface: pb.bySurface,
@@ -326,10 +343,11 @@ export function aggregate(records, opts = {}) {
         total: 0,
         thisWeek: 0,
         rolling5h: 0,
+        lastHour: 0,
         byClass: { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 },
         byModel: {},
         bySurface: {},
-        ...(costFn ? { cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0 } } : {}),
+        ...(costFn ? { cost: { total: 0, today: 0, thisWeek: 0, rolling5h: 0, lastHour: 0 } } : {}),
       };
       if (!providerOrder.includes("codex")) providerOrder.push("codex");
     }
@@ -394,6 +412,10 @@ export function aggregate(records, opts = {}) {
     today,
     thisWeek,
     rolling5h,
+    // The burn-rate basis: tokens in the trailing hour. Per-provider counterparts live in
+    // providers.<p>.lastHour — a "tok/hr" figure a UI labels with one provider's name has
+    // to come from there, or the other provider's traffic reads as this one's pace.
+    lastHourTokens,
     window: windowStats,
     providerOrder,
     providers,
@@ -408,6 +430,7 @@ export function aggregate(records, opts = {}) {
           today: costToday,
           thisWeek: costWeek,
           rolling5h: costRolling,
+          lastHour: costLastHour,
           byModel: costByModel,
           unpriced: {
             tokens: unpricedTokens,

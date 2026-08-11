@@ -383,7 +383,15 @@ async function main() {
     const pressure = realPct(agg);
     if (pressure) {
       const suffix = pressure.provider === "codex" ? " Cdx" : "";
-      console.log(`◧ ${100 - pressure.pct}%${suffix}`);
+      // Round and clamp exactly like the app's WindowStats.quotaLeftPercent(), which is
+      // `max(0, min(100, 100 - used))`. Codex's used_percent arrives as a float straight
+      // from the log, so the bare subtraction printed "◧ 35.900000000000006% Cdx" in the
+      // menu bar; Claude's pct is an integer but is uncapped, so an over-cap window printed
+      // "◧ -350%". A label is a rendering, and the same Mac must not get two different
+      // renderings of one number from two front-ends. (core.mjs's own `pct` stays unclamped
+      // on purpose — the detail line's honest "450% of cap" is a different statement.)
+      const left = Math.max(0, Math.min(100, Math.round(100 - pressure.pct)));
+      console.log(`◧ ${left}%${suffix}`);
     } else {
       console.log(`◧ ${abbrev(agg.today)}`);
     }

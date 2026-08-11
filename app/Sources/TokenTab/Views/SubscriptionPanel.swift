@@ -42,7 +42,11 @@ struct SubscriptionPanel: View {
     private var paceLine: (text: String, warn: Bool)? {
         guard w.active, w.cap > 0, let secs = w.secondsToReset(now: now), secs > 0 else { return nil }
         let left = max(0, w.cap - w.tokens)
-        let rate = snapshot.agg.lastHourTokens        // last hour's tokens ≈ tokens / hour
+        // Claude's own last hour ≈ tokens/hour. The combined `agg.lastHourTokens` counts
+        // Codex too, and this rate is measured against Claude's own cap — so a busy Codex
+        // hour would spend Claude's headroom on paper and raise a "Heavy pace" warning
+        // against a window that is nowhere near full.
+        let rate = snapshot.claudeLastHourTokens
         if rate <= 0 {
             return left > 0 ? ("At this pace, you're clear until reset", false) : nil
         }
@@ -126,7 +130,9 @@ struct SubscriptionPanel: View {
                     statRow("Tokens used",
                             w.cap > 0 ? "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))" : Fmt.abbrev(w.tokens),
                             color: Theme.ink)
-                    statRow("Trend", "+\(Fmt.abbrev(snapshot.agg.lastHourTokens)) / hr", color: Theme.green)
+                    // Claude's own rate — this row sits under the 5-HOUR SESSION heading,
+                    // which is Claude's inferred window (see `paceLine`).
+                    statRow("Trend", "+\(Fmt.abbrev(snapshot.claudeLastHourTokens)) / hr", color: Theme.green)
                 }
                 .padding(.horizontal, 17).padding(.top, 12)
             }

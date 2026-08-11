@@ -170,6 +170,50 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(calibrateCap(windowTokens: 0, sessionPct: 50))
     }
 
+    /// The admissibility overload — the rule the refresh loop and `--probe` share, so the
+    /// diagnostic can't advertise a cap the app refuses to learn. Each guard gets a case.
+    func testCalibrateCapFromLiveReadingRequiresTheCurrentBlock() {
+        let now = date("2026-06-23T10:00:00Z")
+        // A block that began at 08:00 and resets at 13:00 (5h), 500 tokens in so far.
+        let window = WindowStats(active: true, tokens: 500,
+                                 resetAt: date("2026-06-23T13:00:00Z"),
+                                 blockSeconds: 5 * 3600, cap: 0, calibratedCap: 0)
+        let inBlock = LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T09:58:00Z"))
+        XCTAssertEqual(calibrateCap(from: inBlock, window: window, now: now), 1000,
+                       "a fresh reading from inside this block is what calibration is for")
+
+        // THE BUG: captured at 07:59, one minute before this block began — so it describes
+        // the PREVIOUS block. It is still "fresh" (2 minutes inside the 360s TTL as of the
+        // 08:01 refresh), which is exactly why freshness alone was not enough. Here that
+        // pre-reset 50% would divide this block's 500 tokens and learn a cap of 1000 for a
+        // window whose real cap is far larger.
+        let previousBlock = LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T07:59:00Z"))
+        XCTAssertNil(calibrateCap(from: previousBlock, window: window, now: date("2026-06-23T08:01:00Z")),
+                     "a reading from the previous block is not evidence about this one")
+        XCTAssertTrue(previousBlock.isFresh(now: date("2026-06-23T08:01:00Z")),
+                      "and it really is fresh — freshness is not the check that catches it")
+
+        // Exactly at the block boundary counts as inside it (>=). Read at 08:02, so the
+        // reading is also still fresh — the two guards are independent and this case is
+        // isolating the boundary one.
+        let atBoundary = LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T08:00:00Z"))
+        XCTAssertEqual(calibrateCap(from: atBoundary, window: window, now: date("2026-06-23T08:02:00Z")), 1000)
+
+        // Stale, no percentage, no capture time, idle window, below the floor: all decline.
+        XCTAssertNil(calibrateCap(from: LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T09:00:00Z")),
+                                  window: window, now: now), "an hour old is past the TTL")
+        XCTAssertNil(calibrateCap(from: LiveUsage(capturedAt: date("2026-06-23T09:58:00Z")),
+                                  window: window, now: now), "no session %")
+        XCTAssertNil(calibrateCap(from: LiveUsage(sessionPct: 50), window: window, now: now),
+                     "no capture time — nothing to place in a block")
+        let idle = WindowStats(active: false, tokens: 0, resetAt: nil,
+                               blockSeconds: 5 * 3600, cap: 0, calibratedCap: 0)
+        XCTAssertNil(calibrateCap(from: inBlock, window: idle, now: now),
+                     "no active block to attribute the reading to")
+        XCTAssertNil(calibrateCap(from: LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:58:00Z")),
+                                  window: window, now: now), "below calibrateCap's minPct floor")
+    }
+
     func testLiveFreshness() {
         let now = date("2026-06-23T10:00:00Z")
         XCTAssertTrue(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:55:00Z")).isFresh(now: now),
@@ -353,5 +397,38 @@ final class CoreTests: XCTestCase {
         let weekly = Fmt.resetLabel(nextWeek, relativeTo: now, calendar: cal, locale: locale)
         XCTAssertTrue(weekly.contains("Sat"), "a future weekly reset must identify its day: \(weekly)")
         XCTAssertTrue(weekly.contains("18:19"), "the reset label still includes its clock: \(weekly)")
+    }
+
+    /// Twin of test/core.test.mjs "thisWeek: week start survives a midnight DST jump".
+    /// Deliberately NOT a shared parity fixture: the fixtures pin calendar-day fields only
+    /// where they are timezone-independent, and this case is the opposite of that — it only
+    /// means anything in a zone whose clocks jump forward AT midnight.
+    ///
+    /// `aggregate` builds its calendar from `.current`, so the zone has to be overridden at
+    /// the process level. Assigning `NSTimeZone.default` does NOT do that — under
+    /// swift-foundation `TimeZone.current` reads the cached system zone and ignores it, so
+    /// that idiom leaves the test running in the machine's own zone, passing everywhere and
+    /// proving nothing. Setting TZ and resetting the cache is what actually moves it.
+    func testWeekStartSurvivesMidnightDST() {
+        // Asia/Beirut springs forward 00:00 -> 01:00 on 2026-03-29, so that day has no 00:00.
+        let saved = getenv("TZ").map { String(cString: $0) }
+        setenv("TZ", "Asia/Beirut", 1)
+        NSTimeZone.resetSystemTimeZone()
+        defer {
+            if let saved { setenv("TZ", saved, 1) } else { unsetenv("TZ") }
+            NSTimeZone.resetSystemTimeZone()
+        }
+        XCTAssertEqual(TimeZone.current.identifier, "Asia/Beirut",
+                       "the zone override is the whole test — without it this proves nothing")
+
+        // "now" is Sun 2026-03-29 12:00 local, so the Monday-based week began Mon 2026-03-23.
+        let now = date("2026-03-29T09:00:00Z")
+        // Mon 2026-03-23 00:30 local — inside that week, but before the 01:00 that the old
+        // wall-clock-carrying implementation used as the week start.
+        let firstHour = rec(messageId: "w", requestId: "1", usage: u(1000, 0, 0, 0),
+                            timestamp: "2026-03-22T22:30:00Z")
+        let a = aggregate([firstHour], options: AggregateOptions(now: now, weekStartsOn: 1))
+        XCTAssertEqual(a.thisWeek, 1000, "the week's first hour must not fall outside the week")
+        XCTAssertEqual(a.total, 1000)
     }
 }

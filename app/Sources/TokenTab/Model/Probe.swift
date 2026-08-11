@@ -95,12 +95,19 @@ enum Probe {
         // Live block mirrors what the app would headline: the server %, its freshness, and
         // the cap the app would learn from it (cap ≈ window tokens / sessionPct).
         if let l = live {
+            // One `now` for both the freshness flag and the cap, so the two can't disagree.
+            let now = Date()
             var liveOut: [String: Any] = [
-                "fresh": l.isFresh(now: Date()),
+                "fresh": l.isFresh(now: now),
                 "sessionPct": l.sessionPct ?? -1,
                 "weeklyPct": l.weeklyPct ?? -1,
             ]
-            if let p = l.sessionPct, let cap = calibrateCap(windowTokens: agg.window.tokens, sessionPct: p) {
+            // The SAME admissibility rule the app applies (Core's calibrateCap(from:window:now:)):
+            // fresh, has a session %, an active block, and captured at or after that block
+            // began. Calling bare calibrateCap here instead would print a cap during a block
+            // rollover that the app deliberately refuses to learn — the probe's whole job is
+            // to report what the app does, so an over-eager number here is worse than none.
+            if let cap = calibrateCap(from: l, window: agg.window, now: now) {
                 liveOut["calibratedCap"] = cap
             }
             out["live"] = liveOut

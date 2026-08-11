@@ -161,17 +161,38 @@ final class MenuBarLabelTests: XCTestCase {
         XCTAssertEqual(label(snap, metric: .cost).claudeGlyph.size.width, 8, "burn ⇒ health dot")
     }
 
-    /// A snapshot with no per-provider cost block (pre-provider aggregates, and any
-    /// aggregate built without a cost model) still reads the combined total — there,
-    /// combined IS Claude-only, so the fallback is correct rather than merely safe.
-    func testDualClaudeCostFallsBackToCombinedWhenNoProviderCostBlock() {
+    /// An aggregate that predates per-provider subtotals carries NO buckets at all, and
+    /// there the combined total IS Claude-only — so the fallback is correct rather than
+    /// merely safe. That absence is the thing that licenses it.
+    func testDualClaudeCostFallsBackToCombinedForALegacyAggregate() {
+        var snap = Snapshot.empty
+        snap.mode = .burn
+        snap.agg.today = 4_000_000
+        snap.agg.total = 4_000_000
+        var cost = CostSummary()
+        cost.today = 12.5
+        snap.agg.cost = cost
+        XCTAssertTrue(snap.agg.providers.isEmpty, "the precondition for the fallback")
+        XCTAssertEqual(label(snap, metric: .cost).claudeFigure, "$12.50")
+    }
+
+    /// But once the aggregate HAS provider buckets, a missing Claude cost block means zero,
+    /// never "whatever the combined block says" — that combined figure includes Codex.
+    ///
+    /// Real aggregation can't actually produce this shape (both engines create a bucket's
+    /// cost block under the same condition as the combined one, so they exist together or
+    /// not at all); it is pinned because the old fallback was written as if it could, and
+    /// that reasoning is what let a Codex-only aggregate — which very much does occur —
+    /// report Codex's spend as Claude's.
+    func testDualClaudeCostIsZeroWhenBucketsExistButClaudeHasNoCostBlock() {
         var snap = snapshot(claudeToday: 4_000_000, codexToday: 1_000_000,
                             codexUsedPct: 8, mode: .burn)
         var cost = CostSummary()
         cost.today = 12.5
         snap.agg.cost = cost
         XCTAssertNil(snap.agg.providers["claude"]?.cost)
-        XCTAssertEqual(label(snap, metric: .cost).claudeFigure, "$12.50")
+        XCTAssertEqual(label(snap, metric: .cost).claudeFigure, "$0.00",
+                       "not the $12.50 combined — that total is partly Codex's")
     }
 
     // MARK: - An expired official window is not a percentage any more

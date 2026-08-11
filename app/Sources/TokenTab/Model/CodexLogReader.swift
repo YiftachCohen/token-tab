@@ -275,14 +275,16 @@ enum CodexLogReader {
     /// Parse one JSONL file (the per-file unit shared by the one-shot read and the cached
     /// refresh). A vanished/unreadable file is empty (tolerated mid-walk); a partial trailing
     /// line just counts as malformed.
+    /// Lossy UTF-8 decode + ASCII-only line breaking, for the reasons spelled out on
+    /// LogReader.parseFile and in JSONLText: a strict decode threw away a whole file over one
+    /// bad byte, and Foundation's `enumerateLines` cuts a single record into fragments at
+    /// U+2028/U+2029/U+0085, none of which parse. Both readers must cut lines where Node does.
     static func parseFile(_ url: URL) -> FileResult {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else {
+        guard let data = try? Data(contentsOf: url) else {
             return FileResult(records: [], malformed: 0, rateLimits: nil)
         }
-        var lines: [String] = []
-        text.enumerateLines { line, _ in lines.append(line) }
-        return recordsFromLines(lines, fileName: url.lastPathComponent)
+        let text = String(decoding: data, as: UTF8.self)
+        return recordsFromLines(JSONLText.lines(text), fileName: url.lastPathComponent)
     }
 
     /// Read all Codex usage under `root`. `codexRateLimits` is the globally latest snapshot

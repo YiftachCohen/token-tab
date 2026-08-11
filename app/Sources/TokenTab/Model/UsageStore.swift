@@ -97,16 +97,45 @@ struct Snapshot {
     /// Codex has real usage worth showing (its section/secondary row is hidden at zero).
     var codexHasUsage: Bool { (codex?.total ?? 0) > 0 }
 
-    /// Claude has real usage worth showing — the twin of `codexHasUsage`. A Claude-only
-    /// aggregate predates per-provider subtotals, so fall back to the overall total.
-    var claudeHasUsage: Bool { (agg.providers["claude"]?.total ?? agg.total) > 0 }
+    /// Claude's own subtotal, when the aggregate has one.
+    var claude: ProviderSubtotal? { agg.providers["claude"] }
+
+    /// Whether the combined block may stand in for Claude's.
+    ///
+    /// It may in exactly one case: an aggregate that predates per-provider subtotals carries
+    /// NO buckets at all, and there the combined figures ARE Claude's. It may NOT when the
+    /// aggregate has buckets but no Claude one — that is a Codex-only aggregate, where every
+    /// combined figure is Codex's and Claude's are a true zero. Falling back there relabels
+    /// Codex's tokens and dollars as Claude's, which is the exact mislabelling the whole
+    /// per-provider block exists to prevent; it also flips `headlineProvider` to `.claude`
+    /// (below) whenever no official Codex window is available, so a Codex-only user gets a
+    /// Claude panel showing their Codex usage.
+    private var combinedIsClaudes: Bool { agg.providers.isEmpty }
+
+    /// Claude has real usage worth showing — the twin of `codexHasUsage`.
+    var claudeHasUsage: Bool { (claude?.total ?? (combinedIsClaudes ? agg.total : 0)) > 0 }
+
+    /// Claude's OWN tokens today. `agg.today` is every provider's added together.
+    var claudeToday: Int { claude?.today ?? (combinedIsClaudes ? agg.today : 0) }
 
     /// Claude's OWN estimated spend today. `agg.cost.today` is every provider's spend added
     /// together, so any figure the UI labels "Claude" has to come from here instead — one
-    /// priced Codex record would otherwise inflate it. Falls back to the combined total for a
-    /// legacy aggregate with no per-provider cost block (there, combined *is* Claude-only).
+    /// priced Codex record would otherwise inflate it.
     var claudeCostToday: Double {
-        agg.providers["claude"]?.cost?.today ?? agg.cost?.today ?? 0
+        claude?.cost?.today ?? (combinedIsClaudes ? (agg.cost?.today ?? 0) : 0)
+    }
+
+    /// Claude's OWN burn rate — tokens in the trailing hour. `agg.lastHourTokens` is every
+    /// provider's traffic added together, so a busy Codex hour reads as Claude pace: it
+    /// inflates the "tok/hr" trend, and (worse) the projections built on it, which measure
+    /// that rate against Claude's own 5h cap.
+    var claudeLastHourTokens: Int {
+        claude?.lastHour ?? (combinedIsClaudes ? agg.lastHourTokens : 0)
+    }
+
+    /// Claude's OWN dollars-per-hour, the $ twin of `claudeLastHourTokens`.
+    var claudeCostLastHour: Double {
+        claude?.cost?.lastHour ?? (combinedIsClaudes ? (agg.cost?.lastHour ?? 0) : 0)
     }
 
     /// Both providers have usage, so a dual menu-bar label has two real figures to put up.
@@ -197,8 +226,15 @@ struct Snapshot {
         case (_?, nil):    return .claude
         case (nil, _?):    return .codex
         case (nil, nil):
-            // No real % anywhere → combined today-tokens decides (current behavior extended).
-            let claudeToday = agg.providers["claude"]?.today ?? agg.today
+            // A provider that has no usage AT ALL cannot headline over one that does. Today's
+            // tokens alone can't express that: before either has run today the comparison is
+            // 0 vs 0, and the tie went to Claude — so a Codex-only user got a Claude-labelled
+            // panel every morning until they next ran Codex.
+            if codexHasUsage && !claudeHasUsage { return .codex }
+            // Then today-tokens decide, each provider's OWN. Reading the COMBINED total as
+            // Claude's here is what made a Codex-only aggregate headline `.claude` even mid-
+            // session: Claude's figure was Codex's own tokens, so it could never lose.
+            let claudeToday = self.claudeToday
             let codexToday  = codex?.today ?? 0
             return (codexHasUsage && codexToday > claudeToday) ? .codex : .claude
         }
@@ -488,8 +524,11 @@ final class UsageStore: ObservableObject {
                                          lastUpdated: now, cap: cap, live: live, history: history)
                 // Learn the cap from a fresh live reading (cap ≈ tokens / sessionPct) so a real
                 // % survives once live goes stale. Takes effect on the next refresh's cap.
-                if let l = live, l.isFresh(now: now), let p = l.sessionPct,
-                   let learned = calibrateCap(windowTokens: agg.window.tokens, sessionPct: p),
+                // Admissibility — freshness AND same-block membership — lives in Core's
+                // `calibrateCap(from:window:now:)`, which `--probe` calls too, so the
+                // diagnostic can never advertise a cap this loop would refuse to learn.
+                if let l = live,
+                   let learned = calibrateCap(from: l, window: agg.window, now: now),
                    learned != self.calibratedCap {
                     self.calibratedCap = learned
                 }

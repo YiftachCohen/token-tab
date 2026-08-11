@@ -212,6 +212,35 @@ public func calibrateCap(windowTokens: Int, sessionPct: Int, minPct: Int = 10) -
     return Int((Double(windowTokens) / (Double(sessionPct) / 100.0)).rounded())
 }
 
+/// The cap a live reading actually justifies, or nil when that reading is not admissible
+/// evidence about the CURRENT block. This is the whole eligibility rule in one place so
+/// every caller applies the same one — the app's refresh loop, which persists what it
+/// learns, and `--probe`, which advertises its result as "the cap the app would learn".
+/// A probe that skipped a check would print a cap the app rightly refuses, and send anyone
+/// debugging a wrong percentage hunting in the wrong place.
+///
+/// Admissible = fresh, carries a session %, there IS an active block to attribute it to,
+/// and it was captured at or after that block began (`resetAt - blockSeconds`).
+///
+/// The last condition is the subtle one, and `isFresh` does not imply it: the helper runs
+/// every 300s against a 360s TTL, so for minutes after a block rolls over a PRE-reset
+/// percentage is still "fresh" while `window.tokens` has already restarted from ~0.
+/// Dividing the new block's tokens by the old block's 85% learns a cap an order of
+/// magnitude too small — which is then persisted, makes tokenPct exceed 100, and pins the
+/// menu bar to a red 0% with most of the quota untouched. It does not self-heal either:
+/// the next honest reading falls below `minPct` and so declines to correct it.
+public func calibrateCap(from live: LiveUsage, window: WindowStats, now: Date,
+                         minPct: Int = 10) -> Int? {
+    guard live.isFresh(now: now),
+          let pct = live.sessionPct,
+          window.active,
+          let capturedAt = live.capturedAt,
+          let resetAt = window.resetAt,
+          capturedAt >= resetAt.addingTimeInterval(-window.blockSeconds)
+    else { return nil }
+    return calibrateCap(windowTokens: window.tokens, sessionPct: pct, minPct: minPct)
+}
+
 /// Main (direct) vs sub-agent (sidechain) split — the design's "MAIN vs SUB-AGENT".
 public struct MainSubSplit: Sendable {
     public var mainTokens: Int = 0
@@ -285,6 +314,8 @@ public struct ProviderCost: Sendable {
     public var today: Double = 0
     public var thisWeek: Double = 0
     public var rolling5h: Double = 0
+    /// Dollars in the trailing hour — this provider's own $/hr burn rate.
+    public var lastHour: Double = 0
 
     public init() {}
 }
@@ -297,6 +328,9 @@ public struct ProviderSubtotal: Sendable {
     public var total = 0
     public var thisWeek = 0
     public var rolling5h = 0
+    /// Tokens in the trailing hour — this provider's own burn rate (the combined
+    /// `Aggregate.lastHourTokens` is every provider's traffic added together).
+    public var lastHour = 0
     public var byClass = TokenUsage()
     public var byModel: [String: Int] = [:]
     public var bySurface: [Surface: Int] = [:]
@@ -429,7 +463,15 @@ private func startOfLocalWeek(_ now: Date, weekStartsOn: Int, _ cal: Calendar) -
     let weekday = cal.component(.weekday, from: startOfDay) // 1 = Sunday
     let zeroBased = weekday - 1
     let diff = (zeroBased - weekStartsOn + 7) % 7
-    return cal.date(byAdding: .day, value: -diff, to: startOfDay) ?? startOfDay
+    let shifted = cal.date(byAdding: .day, value: -diff, to: startOfDay) ?? startOfDay
+    // Re-take the start of day after shifting. `date(byAdding: .day)` preserves the
+    // wall-clock time, so in a zone that springs forward AT midnight today's startOfDay is
+    // already 01:00 and that hour rides along to a week-start day whose midnight exists —
+    // beginning the week at 01:00 and dropping that day's first hour from thisWeek. Mirrors
+    // the same fix in src/core.mjs startOfLocalWeek. Deliberately not a shared parity
+    // fixture — the case is timezone-dependent by definition; the twin tests are
+    // CoreTests.testWeekStartSurvivesMidnightDST and its core.test.mjs counterpart.
+    return cal.startOfDay(for: shifted)
 }
 
 // MARK: - aggregate()
@@ -586,7 +628,10 @@ public func aggregate(_ records: [UsageRecord],
                 }
                 if tms >= weekStart { agg.thisWeek += sum; providerBuckets[provider]!.thisWeek += sum }
                 if tms > rollingCutoff { agg.rolling5h += sum; providerBuckets[provider]!.rolling5h += sum }
-                if tms > hourCutoff { agg.lastHourTokens += sum }
+                if tms > hourCutoff {
+                    agg.lastHourTokens += sum
+                    providerBuckets[provider]!.lastHour += sum
+                }
                 if priced {
                     if dayKey == todayKey {
                         costSummary.today += usd
@@ -600,7 +645,10 @@ public func aggregate(_ records: [UsageRecord],
                         costSummary.rolling5h += usd
                         providerBuckets[provider]!.cost?.rolling5h += usd
                     }
-                    if tms > hourCutoff { costSummary.lastHour += usd }
+                    if tms > hourCutoff {
+                        costSummary.lastHour += usd
+                        providerBuckets[provider]!.cost?.lastHour += usd
+                    }
                 }
                 if provider == "claude" { stamps.append((tms, sum)) }
             }
