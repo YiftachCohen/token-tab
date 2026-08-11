@@ -1,7 +1,7 @@
 export const meta = {
   name: 'bug-hunt',
   description: 'Hunt for real bugs across Token Tab: dimension finders, adversarial verification, ranked report',
-  whenToUse: 'Run before a release, after a large refactor, or whenever you want a correctness sweep of the two engines. Workflow({name:"bug-hunt"}) sweeps the whole repo at standard depth (~34 agents); args:{depth:"quick"} (~15) or {depth:"deep"} (~68) sets how hard it looks; args:{scope:"diff"} narrows it to what this branch changed vs main.',
+  whenToUse: 'Run before a release, after a large refactor, or whenever you want a correctness sweep of the two engines. Workflow({name:"bug-hunt"}) sweeps the whole repo at standard depth (~34 agents); args:{depth:"quick"} (~15) or {depth:"deep"} (~68) sets how hard it looks; args:{scope:"diff"} narrows it to what this branch changed vs origin/main.',
   phases: [
     { title: 'Recon', detail: 'map the parity pairs, the fixtures, and what CI already enforces' },
     { title: 'Hunt', detail: 'one finder per bug dimension, each blind to the others' },
@@ -105,10 +105,48 @@ const REPORT_SCHEMA = {
 }
 
 // ---------------------------------------------------------------------------
+// Scope. This rides inside GROUND_RULES so EVERY agent gets it — the scout, all
+// seven finders, every verification lens. It used to appear in the scout prompt
+// alone, which meant `scope:"diff"` only narrowed the brief: each finder still
+// received its dimension prompt telling it to hunt the whole repo, and duly
+// reported pre-existing bugs the branch never touched.
+//
+// The base ref is resolved through origin/main rather than `main`, because a local
+// `main` is routinely stale or absent (in a Conductor worktree it is a different
+// checkout entirely). When this was written, local main sat behind origin/main and
+// `git diff main...HEAD` reported 50 changed files for a 23-file branch — a hunt
+// that silently covers twice its advertised scope is worse than one that fails.
+// ---------------------------------------------------------------------------
+const SCOPE_RULE =
+  scope === 'diff'
+    ? `
+## Scope — ONLY what this branch changed
+
+Resolve the base ref first; do NOT assume a local \`main\` exists or is current:
+
+    BASE=$(git rev-parse --verify --quiet origin/main || git rev-parse --verify --quiet main)
+    git diff --stat "$BASE...HEAD"
+    git diff --name-only "$BASE...HEAD"
+
+State the base you resolved and the changed-file count in your output, so a wrong base shows
+up as a wrong number instead of passing silently.
+
+A defect in a file this branch did not touch is OUT OF SCOPE — do not report it, however real
+it looks. The one exception: a pre-existing defect that this branch now REACHES (a new caller,
+a new input, a loosened guard) is in scope — name the changed line that reaches it.
+`
+    : `
+## Scope — the whole repo
+
+Every file under the repo root is fair game.
+`
+
+// ---------------------------------------------------------------------------
 // House rules every agent gets. Most bug-hunt noise comes from an agent that does
 // not know what this repo has *decided*; this is the decision list.
 // ---------------------------------------------------------------------------
 const GROUND_RULES = `
+${SCOPE_RULE}
 ## The repo
 
 Token Tab reads local Claude Code / Codex JSONL logs and shows token usage in the macOS menu
@@ -376,7 +414,7 @@ seven hunters will each be given as context. You are not looking for bugs — yo
 
 ${GROUND_RULES}
 
-Scope for this hunt: ${scope === 'diff' ? 'ONLY what this branch changed vs main (run `git diff --stat main...HEAD` and `git diff main...HEAD --name-only`; list the changed files and the functions they touch)' : 'the whole repo'}.
+${scope === 'diff' ? 'The scope section above binds this hunt. Open the brief with it: the base ref you resolved, the changed files, and the functions they touch — the hunters size their search from that list.' : 'The scope section above binds this hunt: the whole repo.'}
 
 Do this:
 1. Read CLAUDE.md, AGENTS.md, and the file headers of src/core.mjs, src/pricing.mjs, src/codex.mjs

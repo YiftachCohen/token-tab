@@ -212,6 +212,35 @@ public func calibrateCap(windowTokens: Int, sessionPct: Int, minPct: Int = 10) -
     return Int((Double(windowTokens) / (Double(sessionPct) / 100.0)).rounded())
 }
 
+/// The cap a live reading actually justifies, or nil when that reading is not admissible
+/// evidence about the CURRENT block. This is the whole eligibility rule in one place so
+/// every caller applies the same one — the app's refresh loop, which persists what it
+/// learns, and `--probe`, which advertises its result as "the cap the app would learn".
+/// A probe that skipped a check would print a cap the app rightly refuses, and send anyone
+/// debugging a wrong percentage hunting in the wrong place.
+///
+/// Admissible = fresh, carries a session %, there IS an active block to attribute it to,
+/// and it was captured at or after that block began (`resetAt - blockSeconds`).
+///
+/// The last condition is the subtle one, and `isFresh` does not imply it: the helper runs
+/// every 300s against a 360s TTL, so for minutes after a block rolls over a PRE-reset
+/// percentage is still "fresh" while `window.tokens` has already restarted from ~0.
+/// Dividing the new block's tokens by the old block's 85% learns a cap an order of
+/// magnitude too small — which is then persisted, makes tokenPct exceed 100, and pins the
+/// menu bar to a red 0% with most of the quota untouched. It does not self-heal either:
+/// the next honest reading falls below `minPct` and so declines to correct it.
+public func calibrateCap(from live: LiveUsage, window: WindowStats, now: Date,
+                         minPct: Int = 10) -> Int? {
+    guard live.isFresh(now: now),
+          let pct = live.sessionPct,
+          window.active,
+          let capturedAt = live.capturedAt,
+          let resetAt = window.resetAt,
+          capturedAt >= resetAt.addingTimeInterval(-window.blockSeconds)
+    else { return nil }
+    return calibrateCap(windowTokens: window.tokens, sessionPct: pct, minPct: minPct)
+}
+
 /// Main (direct) vs sub-agent (sidechain) split — the design's "MAIN vs SUB-AGENT".
 public struct MainSubSplit: Sendable {
     public var mainTokens: Int = 0

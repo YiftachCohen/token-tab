@@ -170,6 +170,50 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(calibrateCap(windowTokens: 0, sessionPct: 50))
     }
 
+    /// The admissibility overload — the rule the refresh loop and `--probe` share, so the
+    /// diagnostic can't advertise a cap the app refuses to learn. Each guard gets a case.
+    func testCalibrateCapFromLiveReadingRequiresTheCurrentBlock() {
+        let now = date("2026-06-23T10:00:00Z")
+        // A block that began at 08:00 and resets at 13:00 (5h), 500 tokens in so far.
+        let window = WindowStats(active: true, tokens: 500,
+                                 resetAt: date("2026-06-23T13:00:00Z"),
+                                 blockSeconds: 5 * 3600, cap: 0, calibratedCap: 0)
+        let inBlock = LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T09:58:00Z"))
+        XCTAssertEqual(calibrateCap(from: inBlock, window: window, now: now), 1000,
+                       "a fresh reading from inside this block is what calibration is for")
+
+        // THE BUG: captured at 07:59, one minute before this block began — so it describes
+        // the PREVIOUS block. It is still "fresh" (2 minutes inside the 360s TTL as of the
+        // 08:01 refresh), which is exactly why freshness alone was not enough. Here that
+        // pre-reset 50% would divide this block's 500 tokens and learn a cap of 1000 for a
+        // window whose real cap is far larger.
+        let previousBlock = LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T07:59:00Z"))
+        XCTAssertNil(calibrateCap(from: previousBlock, window: window, now: date("2026-06-23T08:01:00Z")),
+                     "a reading from the previous block is not evidence about this one")
+        XCTAssertTrue(previousBlock.isFresh(now: date("2026-06-23T08:01:00Z")),
+                      "and it really is fresh — freshness is not the check that catches it")
+
+        // Exactly at the block boundary counts as inside it (>=). Read at 08:02, so the
+        // reading is also still fresh — the two guards are independent and this case is
+        // isolating the boundary one.
+        let atBoundary = LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T08:00:00Z"))
+        XCTAssertEqual(calibrateCap(from: atBoundary, window: window, now: date("2026-06-23T08:02:00Z")), 1000)
+
+        // Stale, no percentage, no capture time, idle window, below the floor: all decline.
+        XCTAssertNil(calibrateCap(from: LiveUsage(sessionPct: 50, capturedAt: date("2026-06-23T09:00:00Z")),
+                                  window: window, now: now), "an hour old is past the TTL")
+        XCTAssertNil(calibrateCap(from: LiveUsage(capturedAt: date("2026-06-23T09:58:00Z")),
+                                  window: window, now: now), "no session %")
+        XCTAssertNil(calibrateCap(from: LiveUsage(sessionPct: 50), window: window, now: now),
+                     "no capture time — nothing to place in a block")
+        let idle = WindowStats(active: false, tokens: 0, resetAt: nil,
+                               blockSeconds: 5 * 3600, cap: 0, calibratedCap: 0)
+        XCTAssertNil(calibrateCap(from: inBlock, window: idle, now: now),
+                     "no active block to attribute the reading to")
+        XCTAssertNil(calibrateCap(from: LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:58:00Z")),
+                                  window: window, now: now), "below calibrateCap's minPct floor")
+    }
+
     func testLiveFreshness() {
         let now = date("2026-06-23T10:00:00Z")
         XCTAssertTrue(LiveUsage(sessionPct: 9, capturedAt: date("2026-06-23T09:55:00Z")).isFresh(now: now),
