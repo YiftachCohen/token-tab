@@ -170,6 +170,13 @@ final class MeasuringHostingView<Content: View>: NSHostingView<Content> {
         super.invalidateIntrinsicContentSize()
         onIntrinsicSizeInvalidated?()
     }
+
+    /// This view is visual content inside an NSButton, not a control of its own. Returning nil
+    /// keeps the entire rendered label click-through so the status button receives the action
+    /// no matter whether the pointer is over a ring, a figure, or the surrounding padding.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
 }
 
 /// The hosted label. It observes the store itself (an NSHostingView's root view is not in a
