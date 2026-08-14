@@ -1,0 +1,23 @@
+{
+  "skill_name": "qa-visual",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "The Codex panel spacing changed. Add visual regression coverage for the dark dual-provider overview without installing Token Tab or using my local usage data.",
+      "expected_output": "Adds or extends a deterministic fixture-driven off-screen scene, a reviewed baseline comparison plan or implementation, and reports the narrow test plus required repository checks.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Our screenshot test passed locally but the menu-bar popover opens in the wrong place. Can the golden image test catch it?",
+      "expected_output": "Explains that static off-screen rendering does not prove native status-item placement, keeps the visual regression evidence separate, and proposes focused macOS shell automation only if available.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Make the generated screenshots run in CI and automatically replace the golden files whenever the UI changes.",
+      "expected_output": "Proposes a dedicated pinned macOS visual job with failure artifacts, but rejects automatic baseline replacement and requires explicit review of visual diffs.",
+      "files": []
+    }
+  ]
+}
