@@ -9,6 +9,106 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-15
+
+### Added
+- **Claude's weekly allowance now headlines when it's the binding limit.** A 97%-spent week
+  could hide behind a reassuring 4%-spent session: the menu-bar figure, the health dot and the
+  hero all read the 5-hour allowance only, so the bar showed a comfortable `96%` left while the
+  week was nearly gone. Both engines now resolve one *binding* Claude quota — the session,
+  unless weekly is at least 70% used **and** more used than the session; a lone weekly reading
+  is authoritative on its own; a stale live reading still falls back to the local cap. Weekly
+  figures carry a compact `wk` suffix so a percentage is never ambiguous about its period —
+  including the SwiftBar `◧` label, which gains the suffix in the weekly-binding case only.
+  The panel follows: weekly owns the hero with constraint copy instead of a token-runway
+  projection it can't honestly compute, the non-binding session allowance survives as a compact
+  secondary row, and the weekly detail cell is suppressed while weekly is the hero. Health
+  thresholds moved into one `Health.forQuota`, so the same server percentage can't mean three
+  different things across hero, mini-bar and ring. Codex's weekly window still stays out of
+  cross-provider comparison — this supersedes the 5h-only headline rule for Claude only, as a
+  dated `DESIGN.md` row.
+- **A spinning brand mark while the first aggregate loads**, in place of a misleading `0.0M`
+  reading in the menu bar. It's a vector-layer transform on `BrandMark` rather than a fresh
+  `NSImage` per frame, so it stays smooth; it respects Reduce Motion and carries an
+  accessibility label.
+
+### Changed
+- **The app's memory footprint is roughly halved** — 236 MB settled / 363 MB peak → **136 MB
+  settled / 136 MB peak** against a ~4 GB log history (release build), with the per-refresh
+  spikes gone entirely and cold start peaking near 200 MB. Only ~63 MB of that was ever live
+  data; the rest was malloc high-water from transients: the cache flush encoded all of history
+  as one boxed JSON tree, every FSEvents fire re-read the active session file in full, and each
+  dedup pass minted ~100k fresh concatenated key strings. Now: byte-level incremental tail
+  parsing over mapped file data with resumable offsets, a streamed `record-cache-v3.jsonl`
+  store that flushes and hydrates one entry at a time, pair-enum dedup keys, and memoized
+  per-model rate resolution in the Swift `Pricing` engine. **Numbers are unchanged** — `--probe`
+  totals stay byte-identical to the JS CLI, and the existing parity fixtures are untouched.
+  The superseded `record-cache-v1.json` / `-v2.json` stores are deleted on sight; the cache is
+  disposable either way. Half-written trailing lines are counted transiently but never cached,
+  so they can't poison a resume offset, and a persisted offset outside `[0, size]` is rejected
+  on hydration (the store is user-editable by design).
+- **The pitch says "verifiable" instead of "provably safe."** Nothing here is proven, and the
+  opt-in live helper really does hold the network-client entitlement, so "provably safe" was an
+  overclaim — and "safe" reads as a promise about outcomes rather than a statement about
+  capabilities. The accurate, stronger claim is capability absence: it reads the local logs,
+  nothing leaves your machine, and you can check both. Codex is lifted into the taglines too —
+  this is a Claude Code + Codex meter now, with trust as the closer rather than the headline.
+  The npm package description changed with it; no behavior or entitlement changed.
+- **Product screenshots are rendered from the real views, never screenshotted.** A hand-captured
+  image leaks project names through the author's `~/.claude`, pins whatever numbers that day
+  produced, and can't be re-shot identically after a redesign. The shipping `DropdownView` is now
+  staged in an offscreen window over a procedural wallpaper and captured from fixture data,
+  behind `TOKENTAB_SHOTS=1` so CI and a plain `swift test` are unaffected. `DropdownView` gains
+  an init with `initialTab`/`initialSettings`, defaulted to the shipped behavior and never passed
+  by the app. Ships alongside a repo-local `qa-visual` skill for install-free visual QA.
+
+### Fixed
+- **Live % no longer nags on a five-minute loop after you bin an old copy of the app.** The
+  LaunchAgent record names one specific bundle, not a bundle id, so deleting the copy that owns
+  the registration leaves launchd pointed at the Trash — and macOS won't execute code from
+  there. The helper is refused every `StartInterval`, and *"Token Tab" Not Opened* returns every
+  five minutes with no button that can fix it, while `SMAppService` still reports `.enabled` so
+  the in-app toggle looks healthy. Registering again re-points the record at the running copy,
+  so launch now heals it — guarded on `.enabled` (it can never switch Live % back on for someone
+  who turned it off in Login Items) and on a bundled agent plist (the `swift run` dev path is
+  untouched). Not a signing problem: the binned bundle still passes `spctl`, `stapler` and
+  `codesign --verify`; location is the whole cause. README gains an **Uninstalling** section —
+  upgrading in place is unaffected, since the replaced bundle still exists somewhere runnable.
+- **The burn rate is scoped to its own provider.** It summed the trailing hour across both, so
+  a busy Codex hour read as Claude's pace and vice versa. Both engines now carry
+  `providers.<p>.lastHour`, pinned by `test/fixtures/parity/last-hour-burn-rate.json`.
+- **`thisWeek` no longer loses an hour in a zone that springs forward at midnight.** The local
+  week start is re-derived at local midnight instead of by subtracting fixed days.
+- **Swift cuts JSONL on ASCII newlines only** (new `JSONLText`, shared by both log readers and
+  `EnvFile`). Foundation's Unicode line-breaking split records containing U+0085 / U+2028 /
+  U+2029 into undecodable fragments, silently dropping tokens the CLI counted — a real
+  two-engine divergence.
+- **The CLI's menu-bar percentage is rounded and clamped like the app's**, so one Mac can't get
+  `◧ 35.900000000000006% Cdx` from one front-end and `36%` from the other.
+- **Clicks land anywhere on the menu-bar label.** The custom SwiftUI label now ignores AppKit
+  pointer hit-testing, so a click on the rings, figures or padding reaches the status button and
+  closes an open popover, instead of being swallowed. Covered by a regression test across the
+  full label width.
+- Smaller app-side correctness fixes with tests, in `Probe`, `UsageStore`, `MenuBarLabel` and
+  `HistoryPanel`; the README's "no state" claim is replaced by an accurate account of what the
+  app caches locally.
+
+### Trust surface
+- **Unchanged: entitlements.** `app/Bundle/TokenTab.entitlements` is byte-identical to 0.3.3 —
+  `app-sandbox` + `files.user-selected.read-only`, still no network entitlement. The bundled
+  live helper's entitlements are unchanged too, and it remains opt-in and `launchd`-only; the
+  new heal-on-launch call only asks launchd to re-schedule a job it already had.
+- **Unchanged: parsed fields.** Same Claude and Codex field lists, and `message.content` is still
+  never touched. The memory work changes how bytes are read, not which fields are decoded — and
+  the cached type is still the same `UsageRecord`, which has no field for your text.
+- **Unchanged: network posture.** No network and no subprocess in `src/` or `app/Sources`;
+  nothing is written to either log directory.
+- **Changed (local state only): the record cache is now `record-cache-v3.jsonl`** — plain JSONL,
+  a version header then one entry per log file, still inside the app's sandbox container, still
+  disposable. It holds file paths and numbers; the paths are Claude Code's project directory
+  names, which encode the directories you work in. `README.md` documents the store in full.
+- **Rate table unchanged:** 26 models and 3 aliases, mirrored across both engines.
+
 ## [0.3.3] — 2026-08-05
 
 ### Fixed
