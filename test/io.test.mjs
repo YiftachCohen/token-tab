@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +34,19 @@ function makeFixtureDir() {
   const dir = mkdtempSync(join(tmpdir(), "tokentab-io-"));
   writeFileSync(join(dir, "session.jsonl"), FIXTURE + "\n");
   return dir;
+}
+
+function makeFakeClaude({ sessionPct, weeklyPct }) {
+  const dir = mkdtempSync(join(tmpdir(), "tokentab-fake-claude-"));
+  const bin = join(dir, "claude");
+  const result = [
+    `Current session: ${sessionPct}% used · resets 7:39pm`,
+    `Current week (all models): ${weeklyPct}% used · resets Thu 12:05pm`,
+  ].join("\n");
+  const envelope = JSON.stringify({ type: "result", is_error: false, result });
+  writeFileSync(bin, `#!/bin/sh\ncat <<'TOKENTAB_USAGE'\n${envelope}\nTOKENTAB_USAGE\n`);
+  chmodSync(bin, 0o755);
+  return { dir, bin };
 }
 
 // Codex is opt-in per design (TOKENTAB_PROVIDERS default = "whose dir exists"), but
@@ -100,6 +113,38 @@ test("--swiftbar: subscription headline is the usage window; tokens stay in the 
     assert.match(out, /Local only · No network/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--swiftbar: live weekly pressure mirrors the native binding limit and period suffix", async () => {
+  const dir = makeFixtureDir();
+  const fake = makeFakeClaude({ sessionPct: 4, weeklyPct: 97 });
+  try {
+    const env = isolatedEnv(dir, {
+      TOKENTAB_LIVE: "1",
+      TOKENTAB_CLAUDE_BIN: fake.bin,
+    });
+    const { stdout } = await run("node", [CLI, "--swiftbar"], { env });
+    assert.equal(stdout.split("\n")[0], "◧ 3% wk");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(fake.dir, { recursive: true, force: true });
+  }
+});
+
+test("--swiftbar: healthy weekly usage stays detail while the session headlines", async () => {
+  const dir = makeFixtureDir();
+  const fake = makeFakeClaude({ sessionPct: 10, weeklyPct: 40 });
+  try {
+    const env = isolatedEnv(dir, {
+      TOKENTAB_LIVE: "1",
+      TOKENTAB_CLAUDE_BIN: fake.bin,
+    });
+    const { stdout } = await run("node", [CLI, "--swiftbar"], { env });
+    assert.equal(stdout.split("\n")[0], "◧ 90%");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(fake.dir, { recursive: true, force: true });
   }
 });
 

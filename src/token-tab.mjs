@@ -194,14 +194,31 @@ function windowCurrent(w, now = Date.now()) {
   return w.resetAt == null || w.resetAt > now;
 }
 
+// Choose Claude's headline allowance exactly like the native app: session is the normal,
+// actionable focus; weekly takes over at the shared near-limit floor when it is more used.
+// A lone live weekly reading remains authoritative, and the local cap is only a fallback when
+// neither live allowance exists. Returns a USED percentage plus its period.
+function claudePressure(agg, live) {
+  const session = Number.isFinite(live?.sessionPct) ? live.sessionPct : null;
+  const weekly = Number.isFinite(live?.weeklyPct) ? live.weeklyPct : null;
+  if (weekly != null && session == null) return { provider: "claude", pct: weekly, period: "weekly" };
+  if (session != null) {
+    if (weekly != null && weekly >= 70 && weekly > session)
+      return { provider: "claude", pct: weekly, period: "weekly" };
+    return { provider: "claude", pct: session, period: "session" };
+  }
+  return agg.window?.pct != null
+    ? { provider: "claude", pct: agg.window.pct, period: "session" }
+    : null;
+}
+
 // Most-pressured-provider headline (design doc §6): only REAL, CURRENT percentages compete —
-// Codex's official used_percent while its window is still open, and Claude's % only when a
-// cap (TOKENTAB_WINDOW_CAP) makes agg.window.pct real. Inferred time-left never competes
-// with a quota-%. Returns {provider, pct} for whichever is more pressured, or null when
-// neither has a real one.
-function realPct(agg, now = Date.now()) {
+// Codex's official used_percent while its window is still open, and Claude's selected live
+// allowance or configured cap. Inferred time-left never competes with a quota percentage.
+function realPct(agg, live, now = Date.now()) {
   const candidates = [];
-  if (agg.window && agg.window.pct != null) candidates.push({ provider: "claude", pct: agg.window.pct });
+  const claude = claudePressure(agg, live);
+  if (claude) candidates.push(claude);
   const codexPrimary = agg.providers?.codex?.windows?.primary;
   if (codexPrimary && codexPrimary.usedPct != null && windowCurrent(codexPrimary, now))
     candidates.push({ provider: "codex", pct: codexPrimary.usedPct });
@@ -367,9 +384,9 @@ async function main() {
 
   if (mode === "swiftbar") {
     // Headline rule (design doc §6): only REAL percentages compete for the menu-bar
-    // label — Codex's official used_percent, and Claude's % only when a configured
-    // cap makes agg.window.pct real. The most-pressured provider wins; a Codex-led
-    // headline gets a "Cdx" suffix so a Claude % and a Codex % are never ambiguous
+    // label — Codex's official used_percent, and Claude's selected live allowance or
+    // configured cap. The most-pressured provider wins; period/provider suffixes keep
+    // a weekly Claude or Codex headline unambiguous
     // at a glance. Inferred time-left never competes with a real %. Neither provider
     // has a real % (the common case: no TOKENTAB_WINDOW_CAP, Codex absent/disabled)
     // falls back to the current behavior: combined today tokens.
@@ -380,9 +397,9 @@ async function main() {
     // single-provider: its `◧` is one static character, so a second figure would have
     // nothing to identify it (the app can only show both because it draws a colored ring
     // per provider). See the 2026-07-30 rows in DESIGN.md.
-    const pressure = realPct(agg);
+    const pressure = realPct(agg, live);
     if (pressure) {
-      const suffix = pressure.provider === "codex" ? " Cdx" : "";
+      const suffix = pressure.provider === "codex" ? " Cdx" : pressure.period === "weekly" ? " wk" : "";
       // Round and clamp exactly like the app's WindowStats.quotaLeftPercent(), which is
       // `max(0, min(100, 100 - used))`. Codex's used_percent arrives as a float straight
       // from the log, so the bare subtraction printed "◧ 35.900000000000006% Cdx" in the
@@ -401,8 +418,10 @@ async function main() {
         // Live server numbers are authoritative, so they headline; the local
         // estimate is demoted to one gray line so two competing "5h window"
         // percentages never sit side by side.
-        console.log(`5h window: ${live.sessionPct}% used · live (claude /usage)`);
-        if (live.sessionResetText) console.log(`Resets ${live.sessionResetText} | color=gray`);
+        if (live.sessionPct != null) {
+          console.log(`5h window: ${live.sessionPct}% used · live (claude /usage)`);
+          if (live.sessionResetText) console.log(`Resets ${live.sessionResetText} | color=gray`);
+        }
         if (live.weeklyPct != null) console.log(`This week: ${live.weeklyPct}% used · live`);
         for (const [m, p] of Object.entries(live.weeklyByModel || {}))
           console.log(`This week (${m}): ${p}% used · live | color=gray`);
