@@ -52,6 +52,24 @@ enum ShotFixtures {
         return snap
     }
 
+    /// Weekly is nearly exhausted while the current session is fresh. This pins the asymmetric
+    /// layout: weekly owns the hero, while the still-useful session allowance remains visible
+    /// as a compact secondary reading in the 5-hour section.
+    static func weeklyPressure(now: Date = Date()) -> Snapshot {
+        var snap = subscription(now: now)
+        snap.health = .throttled
+        snap.agg.window = WindowStats(active: true, tokens: 10_000_000,
+                                      resetAt: now.addingTimeInterval(2 * 3600),
+                                      blockSeconds: 5 * 3600, cap: 176_000_000,
+                                      calibratedCap: 176_000_000)
+        snap.agg.lastHourTokens = 12_000_000
+        snap.agg.providers["claude"]?.lastHour = 12_000_000
+        snap.live = LiveUsage(sessionPct: 4, sessionResetText: "7:39pm",
+                              weeklyPct: 97, weeklyResetText: "Thu 12:05pm",
+                              capturedAt: now.addingTimeInterval(-20))
+        return snap
+    }
+
     /// Pay-per-token (Bedrock / API): the meter is running, so dollars lead and everything
     /// turns amber. Costs are the fixture's own numbers, not derived from the rate table.
     static func burn(now: Date = Date()) -> Snapshot {

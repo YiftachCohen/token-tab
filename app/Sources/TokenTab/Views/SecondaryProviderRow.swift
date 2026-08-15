@@ -70,7 +70,8 @@ struct SecondaryProviderRow: View {
     }
 
     /// One-line summary: the official window read for Codex, the runway/today read for Claude.
-    private var summary: String {
+    /// Internal on purpose: tests pin these compact trust statements without inspecting SwiftUI.
+    var summary: String {
         switch provider {
         case .codex:
             if let used = snapshot.codexDisplayUsedPct(now: now) {
@@ -83,9 +84,19 @@ struct SecondaryProviderRow: View {
             }
             return "\(Fmt.abbrev(snapshot.codex?.today ?? 0)) today"
         case .claude:
-            if snapshot.quotaLeft(now: now) != nil {
+            if let quota = snapshot.quotaLeft(now: now) {
+                if quota.period == .session, quota.source == .cap, !snapshot.agg.window.active {
+                    return "no active window"
+                }
+                let period = quota.period == .weekly ? "weekly" : "5h"
+                if let reset = quota.displayResetText {
+                    return "\(quota.usedPct)% of \(period) · resets \(reset)"
+                }
                 let w = snapshot.agg.window
-                return w.active ? "5h window · resets \(Fmt.clock(w.resetAt))" : "no active window"
+                if quota.period == .session, w.active {
+                    return "\(quota.usedPct)% of 5h · resets \(Fmt.clock(w.resetAt))"
+                }
+                return "\(quota.usedPct)% of \(period) limit"
             }
             return "\(Fmt.abbrev(snapshot.claudeToday)) today"
         }

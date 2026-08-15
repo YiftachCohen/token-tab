@@ -27,19 +27,30 @@ struct SubscriptionPanel: View {
     // The framing fork: do we have a real QUOTA % (fresh live, or a cap), or only TIME?
     // `quota` also carries the source (live > cap), so a "% left" never means "% of the
     // clock", and a "· live" tag never ends up sitting over a cap estimate.
-    private var quota: (pct: Int, source: String)? { snapshot.quotaLeft(now: now) }
+    private var quota: ClaudeQuota? { snapshot.quotaLeft(now: now) }
     private var quotaLeft: Int? { quota?.pct }
     private var hasQuota: Bool { quota != nil }
-    private var isLive: Bool { quota?.source == "live" }
+    private var isLive: Bool { quota?.source == .live }
     private var timeLeft: Double { w.timeLeftFraction(now: now) ?? 0 }
+    private var secondarySessionQuota: ClaudeQuota? {
+        snapshot.secondaryClaudeSessionQuota(now: now)
+    }
 
     /// The ring's fill: quota-left when we have it, else the time countdown.
     private var heroFraction: Double { hasQuota ? Double(quotaLeft ?? 0) / 100 : timeLeft }
 
-    /// The "easy" line: a plain-language read on whether the current burn clears the window.
-    /// Honest by construction — only when there's a real quota basis (a cap) and an active
-    /// window, so it never dresses the clock up as a usage forecast. `warn` flips it amber.
-    private var paceLine: (text: String, warn: Bool)? {
+    /// Plain-language guidance for the binding allowance. Weekly server usage gets constraint
+    /// copy because we cannot honestly turn its percentage into token runway; the session path
+    /// retains the local-cap projection against Claude's own trailing-hour burn rate.
+    private var paceLine: (text: String, health: Health)? {
+        if let quota, quota.source == .live, quota.period == .weekly {
+            switch quota.usedPct {
+            case 100...: return ("Weekly limit reached", .throttled)
+            case 90...:  return ("Weekly limit nearly reached", .throttled)
+            case 70...:  return ("Weekly limit is getting close", .near)
+            default:     return ("Weekly limit is your closest constraint", .healthy)
+            }
+        }
         guard w.active, w.cap > 0, let secs = w.secondsToReset(now: now), secs > 0 else { return nil }
         let left = max(0, w.cap - w.tokens)
         // Claude's own last hour ≈ tokens/hour. The combined `agg.lastHourTokens` counts
@@ -48,22 +59,19 @@ struct SubscriptionPanel: View {
         // against a window that is nowhere near full.
         let rate = snapshot.claudeLastHourTokens
         if rate <= 0 {
-            return left > 0 ? ("At this pace, you're clear until reset", false) : nil
+            return left > 0 ? ("At this pace, you're clear until reset", .healthy) : nil
         }
         let projected = Double(rate) * (secs / 3600)
         if projected <= Double(left) {
-            return ("At this pace, you're clear until reset", false)
+            return ("At this pace, you're clear until reset", .healthy)
         }
         let secsToCap = Double(left) / Double(rate) * 3600
-        return ("Heavy pace — ~\(Fmt.duration(secsToCap)) of headroom left", true)
+        return ("Heavy pace — ~\(Fmt.duration(secsToCap)) of headroom left", .near)
     }
 
-    /// The authoritative session reset from live, parenthetical timezone stripped for width
-    /// ("12:29am (Europe/Rome)" → "12:29am"). nil when live carries no reset text.
+    /// The authoritative reset for whichever live allowance headlines the panel.
     private var liveResetText: String? {
-        guard let t = snapshot.live?.sessionResetText, !t.isEmpty else { return nil }
-        if let r = t.range(of: " (") { return String(t[..<r.lowerBound]) }
-        return t
+        quota?.displayResetText
     }
 
     private var staleLiveDetail: String {
@@ -112,37 +120,45 @@ struct SubscriptionPanel: View {
                 if let pace = paceLine {
                     Text(pace.text)
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(pace.warn ? Theme.amber : Theme.green)
+                        .foregroundStyle(pace.health.color)
                         .padding(.vertical, 4).padding(.horizontal, 10)
-                        .background((pace.warn ? Theme.amber : Theme.green).opacity(0.16), in: Capsule())
+                        .background(pace.health.color.opacity(0.16), in: Capsule())
                         .padding(.top, 10)
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 17).padding(.top, 16)
 
-            // 5-HOUR SESSION — the rate-limit window: tokens used (vs cap when set) and the
-            // current burn rate. Shown only with an active window; the runway covers the rest.
-            if w.active {
+            // 5-HOUR SESSION — preserve the authoritative session allowance when weekly is the
+            // binding hero, followed by this machine's local tokens and trend when active.
+            if w.active || secondarySessionQuota != nil {
                 Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 16)
                 VStack(alignment: .leading, spacing: 7) {
                     SectionLabel(text: "5-HOUR SESSION")
-                    statRow("Tokens used",
-                            w.cap > 0 ? "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))" : Fmt.abbrev(w.tokens),
-                            color: Theme.ink)
-                    // Claude's own rate — this row sits under the 5-HOUR SESSION heading,
-                    // which is Claude's inferred window (see `paceLine`).
-                    statRow("Trend", "+\(Fmt.abbrev(snapshot.claudeLastHourTokens)) / hr", color: Theme.green)
+                    if let session = secondarySessionQuota { sessionAllowance(session) }
+                    if w.active {
+                        statRow("Tokens used",
+                                w.cap > 0 ? "\(Fmt.abbrev(w.tokens)) / \(Fmt.abbrev(w.cap))" : Fmt.abbrev(w.tokens),
+                                color: Theme.ink)
+                        // Claude's own rate — this row sits under the 5-HOUR SESSION heading,
+                        // which is Claude's inferred window (see `paceLine`).
+                        statRow("Trend", "+\(Fmt.abbrev(snapshot.claudeLastHourTokens)) / hr", color: Theme.green)
+                    }
                 }
                 .padding(.horizontal, 17).padding(.top, 12)
             }
 
-            // Two-up — this week (a live % when we have it, else tokens) and all-time tokens.
+            // Two-up — this week (unless weekly already owns the hero) and all-time tokens.
             Divider().background(Theme.hairline).padding(.horizontal, 17).padding(.top, 14)
             HStack(alignment: .top, spacing: 12) {
-                weekCell
-                Spacer()
-                twoUp("All time", Fmt.abbrev(snapshot.agg.total))
+                if snapshot.showsWeeklyDetail(now: now) {
+                    weekCell
+                    Spacer()
+                    twoUp("All time", Fmt.abbrev(snapshot.agg.total))
+                } else {
+                    twoUp("All time", Fmt.abbrev(snapshot.agg.total), align: .leading)
+                    Spacer()
+                }
             }
             .padding(.horizontal, 17).padding(.top, 12)
 
@@ -182,10 +198,11 @@ struct SubscriptionPanel: View {
     @ViewBuilder private var runwayBelow: some View {
         if isLive {
             VStack(spacing: 3) {
-                Text(liveResetText.map { "resets \($0)" } ?? "live")
+                Text(liveResetText.map { "resets \($0)" }
+                     ?? (quota?.period == .weekly ? "weekly limit" : "live"))
                     .font(Theme.figure(17, weight: .semibold)).foregroundStyle(Theme.ink)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("this session · from claude /usage")
+                Text("\(quota?.period == .weekly ? "this week" : "this session") · from claude /usage")
                     .font(.system(size: 12)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -219,12 +236,28 @@ struct SubscriptionPanel: View {
         }
     }
 
+    private func sessionAllowance(_ session: ClaudeQuota) -> some View {
+        let health = Health.forQuota(usedPct: session.usedPct)
+        return VStack(alignment: .leading, spacing: 4) {
+            statRow("Session allowance", "\(session.pct)% left", color: health.color)
+            HStack(spacing: 8) {
+                MiniBar(fraction: Double(session.pct) / 100, color: health.color, height: 4)
+                    .frame(width: 116)
+                Spacer(minLength: 4)
+                Text(session.displayResetText.map { "resets \($0)" } ?? "from claude /usage")
+                    .font(.system(size: 10)).foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+            }
+        }
+    }
+
     @ViewBuilder private var weekCell: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("This week").font(.system(size: 11)).foregroundStyle(Theme.muted)
-            if let l = snapshot.live, l.isFresh(now: now), let wk = l.weeklyPct {
-                Text("\(wk)%").font(Theme.figure(15, weight: .semibold)).foregroundStyle(Theme.ink)
-                MiniBar(fraction: Double(wk) / 100, color: Theme.green, height: 4).frame(width: 116)
+            if let weekly = snapshot.claudeWeeklyQuota(now: now) {
+                let health = Health.forQuota(usedPct: weekly.usedPct)
+                Text("\(weekly.pct)% left").font(Theme.figure(15, weight: .semibold)).foregroundStyle(Theme.ink)
+                MiniBar(fraction: Double(weekly.pct) / 100, color: health.color, height: 4).frame(width: 116)
             } else {
                 Text(Fmt.abbrev(snapshot.agg.thisWeek))
                     .font(Theme.figure(15, weight: .semibold)).foregroundStyle(Theme.ink)
@@ -404,8 +437,9 @@ struct SubscriptionPanel: View {
         NSPasteboard.general.setString(s, forType: .string)
     }
 
-    private func twoUp(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .trailing, spacing: 3) {
+    private func twoUp(_ label: String, _ value: String,
+                       align: HorizontalAlignment = .trailing) -> some View {
+        VStack(alignment: align, spacing: 3) {
             Text(label).font(.system(size: 11)).foregroundStyle(Theme.muted)
             Text(value).font(Theme.figure(15, weight: .semibold)).foregroundStyle(Theme.ink)
         }

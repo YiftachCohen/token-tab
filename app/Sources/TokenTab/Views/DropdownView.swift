@@ -149,7 +149,7 @@ struct DropdownView: View {
             switch store.snapshot.mode {
             case .subscription:
                 HStack(spacing: 7) {
-                    if store.snapshot.quotaLeft(now: now)?.source == "live" {
+                    if store.snapshot.quotaLeft(now: now)?.source == .live {
                         HStack(spacing: 4) {
                             GlowDot(color: Theme.green, size: 5, glow: 3)
                             Text("LIVE").font(.system(size: 9, weight: .bold)).tracking(0.6)

@@ -47,6 +47,7 @@ final class ShotsTests: XCTestCase {
     private static func scenes() -> [ShotStage.Scene] {
         let now = Date()
         let subscription = ShotFixtures.subscription(now: now)
+        let weeklyPressure = ShotFixtures.weeklyPressure(now: now)
         let burn = ShotFixtures.burn(now: now)
         let dual = ShotFixtures.dualProvider(now: now)
 
@@ -54,6 +55,9 @@ final class ShotsTests: XCTestCase {
             // The hero: Claude Max runway, glass over a desktop, live reading.
             .init(name: "hero-subscription-dark", snapshot: subscription, scheme: .dark),
             .init(name: "hero-subscription-light", snapshot: subscription, scheme: .light),
+
+            // Weekly owns the hero; the non-binding session remains visible below it.
+            .init(name: "weekly-pressure-dark", snapshot: weeklyPressure, scheme: .dark),
 
             // Pay-per-token — the amber half of the color-as-mode rule.
             .init(name: "burn-bedrock-dark", snapshot: burn, scheme: .dark, menuMetric: .cost),

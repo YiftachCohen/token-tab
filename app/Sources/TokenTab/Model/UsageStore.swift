@@ -12,7 +12,7 @@ import TokenTabCore
 enum Mode { case subscription, burn }
 
 /// Menu-bar health dot (the readability study's "accent dot" signal).
-enum Health { case healthy, near, throttled, neutral
+enum Health: Equatable { case healthy, near, throttled, neutral
     var color: Color {
         switch self {
         case .healthy: return Theme.green
@@ -20,6 +20,80 @@ enum Health { case healthy, near, throttled, neutral
         case .throttled: return Theme.red
         case .neutral: return Theme.green
         }
+    }
+
+    /// A single set of quota thresholds for every place that visualizes allowance pressure.
+    /// Keeping this here prevents the hero, weekly mini-bar, and status-item ring from giving
+    /// the same server percentage three different meanings.
+    static func forQuota(usedPct: Int) -> Health {
+        switch usedPct {
+        case ..<70: return .healthy
+        case 70..<90: return .near
+        default: return .throttled
+        }
+    }
+}
+
+/// The Claude allowance that should headline. The 5-hour session remains the normal focus;
+/// weekly takes over only once it is genuinely near its limit and more pressured than the
+/// session. Ties stay session-first because that preserves the shorter-window framing.
+struct ClaudeQuota {
+    enum Period: Equatable { case session, weekly }
+    enum Source: Equatable { case live, cap }
+
+    /// A healthy weekly reading is useful detail, not the primary constraint. This matches the
+    /// UI's first warning threshold and prevents an ordinary mid-week percentage from replacing
+    /// the more actionable 5-hour pace projection.
+    static let weeklyTakeoverFloor = 70
+
+    let pct: Int                 // percent left (the UI's display direction)
+    let usedPct: Int             // percent used (pressure/health direction)
+    let source: Source
+    let period: Period
+    let resetText: String?
+
+    /// The helper includes a parenthetical timezone that is useful in diagnostics but too wide
+    /// for the menu. Keep the authoritative date/clock and trim only that trailing annotation.
+    var displayResetText: String? {
+        guard let resetText, !resetText.isEmpty else { return nil }
+        if let range = resetText.range(of: " (") { return String(resetText[..<range.lowerBound]) }
+        return resetText
+    }
+
+    static func liveQuota(_ live: LiveUsage?, period: Period, now: Date) -> ClaudeQuota? {
+        guard let live, live.isFresh(now: now) else { return nil }
+        let reading: (usedPct: Int?, resetText: String?) = switch period {
+        case .session: (live.sessionPct, live.sessionResetText)
+        case .weekly:  (live.weeklyPct, live.weeklyResetText)
+        }
+        guard let usedPct = reading.usedPct else { return nil }
+        return quota(usedPct: usedPct, source: .live, period: period,
+                     resetText: reading.resetText)
+    }
+
+    static func resolve(live: LiveUsage?, window: WindowStats, now: Date) -> ClaudeQuota? {
+        let session = liveQuota(live, period: .session, now: now)
+        let weekly = liveQuota(live, period: .weekly, now: now)
+        if let weekly {
+            guard let session else { return weekly }
+            return weekly.usedPct >= weeklyTakeoverFloor && weekly.usedPct > session.usedPct
+                ? weekly : session
+        }
+        if let session { return session }
+
+        if let left = window.quotaLeftPercent() {
+            let clampedLeft = max(0, min(100, left))
+            return ClaudeQuota(pct: clampedLeft, usedPct: 100 - clampedLeft,
+                               source: .cap, period: .session, resetText: nil)
+        }
+        return nil
+    }
+
+    private static func quota(usedPct: Int, source: Source, period: Period,
+                              resetText: String?) -> ClaudeQuota {
+        let used = max(0, min(100, usedPct))
+        return ClaudeQuota(pct: 100 - used, usedPct: used, source: source,
+                           period: period, resetText: resetText)
     }
 }
 
@@ -78,15 +152,34 @@ struct Snapshot {
                                 fileCount: 0, malformed: 0, lastUpdated: .distantPast, cap: 0, live: nil,
                                 history: [])
 
-    /// The headline quota %, resolved down the trust ladder: a FRESH live reading first (the
-    /// real server number), then a cap-based % (manual or live-calibrated). nil → no quota
-    /// basis at all, so the UI shows the honest time countdown. `source` lets the UI label it.
-    func quotaLeft(now: Date) -> (pct: Int, source: String)? {
-        if let l = live, l.isFresh(now: now), let p = l.sessionPct {
-            return (max(0, min(100, 100 - p)), "live")
-        }
-        if let p = agg.window.quotaLeftPercent() { return (p, "cap") }
-        return nil
+    /// The binding Claude quota, resolved down the trust ladder: the fresh 5-hour reading unless
+    /// weekly is at least 70% used and more pressured; then the local session cap when live is
+    /// unavailable. A lone weekly reading remains authoritative. nil means no honest quota basis.
+    func quotaLeft(now: Date) -> ClaudeQuota? {
+        ClaudeQuota.resolve(live: live, window: agg.window, now: now)
+    }
+
+    /// Claude's authoritative 5-hour allowance even when the weekly allowance is the binding
+    /// hero. Kept separate so the detail section can preserve the non-binding limit without
+    /// letting it compete visually with the headline.
+    func claudeSessionQuota(now: Date) -> ClaudeQuota? {
+        ClaudeQuota.liveQuota(live, period: .session, now: now)
+    }
+
+    /// The alternate session reading belongs in the detail section only while weekly owns the
+    /// hero. Returning nil in every other state prevents two copies of the same session quota.
+    func secondaryClaudeSessionQuota(now: Date) -> ClaudeQuota? {
+        guard quotaLeft(now: now)?.period == .weekly else { return nil }
+        return claudeSessionQuota(now: now)
+    }
+
+    func claudeWeeklyQuota(now: Date) -> ClaudeQuota? {
+        ClaudeQuota.liveQuota(live, period: .weekly, now: now)
+    }
+
+    /// The weekly detail cell is redundant while that same allowance owns the hero.
+    func showsWeeklyDetail(now: Date) -> Bool {
+        quotaLeft(now: now)?.period != .weekly
     }
 
     // MARK: - Provider (Codex) helpers — see .context/codex-support-design.md §6
@@ -148,9 +241,9 @@ struct Snapshot {
     /// Codex's official weekly window.
     var codexSecondary: ProviderWindow? { codex?.windows["secondary"] }
 
-    /// The official window the Codex panel can display. Prefer the comparable 5h allowance;
-    /// fall back to weekly when that is the only limit OpenAI emitted. Menu-bar pressure keeps
-    /// using `codexPrimary` only so a weekly percentage is never compared with Claude's 5h %.
+    /// The official window the Codex panel can display. Prefer its 5h allowance; fall back to
+    /// weekly when that is the only limit OpenAI emitted. The single-label provider ranking
+    /// keeps Codex on its primary window per the existing Codex display contract.
     var codexDisplayWindow: ProviderWindow? { codexPrimary ?? codexSecondary }
 
     /// True once the official window a recorded percentage belongs to has already reset. Past
@@ -206,13 +299,10 @@ struct Snapshot {
 
     // MARK: - Max-pressure headline (design §6)
 
-    /// Claude's REAL headline pressure (% used), only when it has an authoritative basis: a
-    /// FRESH live reading or a configured/calibrated cap. Inferred time-left is NOT a real %
-    /// and never competes — nil in that case, so the ranking falls back to today-tokens.
+    /// Claude's REAL headline pressure (% used), using the session allowance unless weekly has
+    /// crossed its takeover floor and is more pressured. Inferred time-left never competes.
     func claudeUsedPct(now: Date) -> Int? {
-        if let l = live, l.isFresh(now: now), let p = l.sessionPct { return max(0, min(100, p)) }
-        if let p = agg.window.tokenPct { return max(0, min(100, p)) }
-        return nil
+        quotaLeft(now: now)?.usedPct
     }
 
     /// The provider the menu-bar/Overview should headline: whichever REAL % is under more
@@ -553,12 +643,9 @@ final class UsageStore: ObservableObject {
     /// (preferred) or the cap-based token %. Without either we never invent danger (green).
     private static func health(for agg: Aggregate, live: LiveUsage?, now: Date, mode: Mode) -> Health {
         guard mode == .subscription else { return .neutral }
-        let used: Int? = (live?.isFresh(now: now) == true ? live?.sessionPct : nil) ?? agg.window.tokenPct
-        guard let pct = used else { return .neutral }
-        switch pct {
-        case ..<70: return .healthy
-        case 70..<90: return .near
-        default: return .throttled
+        guard let quota = ClaudeQuota.resolve(live: live, window: agg.window, now: now) else {
+            return .neutral
         }
+        return Health.forQuota(usedPct: quota.usedPct)
     }
 }

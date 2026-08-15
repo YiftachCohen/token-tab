@@ -85,6 +85,109 @@ final class MenuBarLabelTests: XCTestCase {
         XCTAssertEqual(l.codexFigure, "92%")
     }
 
+    // MARK: - Claude's binding allowance
+
+    /// Claude enforces both a 5-hour session allowance and a weekly allowance. The figure
+    /// must show whichever one has less headroom: a nearly untouched session cannot hide a
+    /// nearly exhausted week behind a reassuring green "96% left" headline.
+    func testClaudeWeeklyLimitHeadlinesWhenItHasLessHeadroomThanTheSession() {
+        var snap = snapshot(windowTokens: 10_000_000, cap: 176_000_000, windowActive: true,
+                            codexToday: 1_000_000, codexUsedPct: 92)
+        snap.live = LiveUsage(sessionPct: 4, sessionResetText: "7:39pm",
+                              weeklyPct: 97,
+                              weeklyResetText: "Aug 20 at 12:05pm (Asia/Jerusalem)",
+                              capturedAt: now)
+
+        let quota = snap.quotaLeft(now: now)
+        XCTAssertEqual(quota?.pct, 3)
+        XCTAssertEqual(quota?.usedPct, 97)
+        XCTAssertEqual(quota?.period, .weekly)
+        XCTAssertEqual(quota?.resetText, "Aug 20 at 12:05pm (Asia/Jerusalem)")
+        XCTAssertEqual(quota?.displayResetText, "Aug 20 at 12:05pm")
+        XCTAssertEqual(Health.forQuota(usedPct: quota?.usedPct ?? 0), .throttled)
+        let session = snap.secondaryClaudeSessionQuota(now: now)
+        XCTAssertEqual(session?.pct, 96)
+        XCTAssertEqual(session?.period, .session)
+        XCTAssertEqual(session?.displayResetText, "7:39pm")
+        XCTAssertEqual(Health.forQuota(usedPct: session?.usedPct ?? 100), .healthy)
+        XCTAssertEqual(snap.headlineProvider(now: now), .claude,
+                       "Claude's 97% week must outrank Codex's 92% session")
+        XCTAssertEqual(label(snap).claudeFigure, "3% wk")
+        XCTAssertEqual(label(snap, scope: .headline).text, "3% wk")
+        XCTAssertFalse(snap.showsWeeklyDetail(now: now),
+                       "the weekly hero must not be repeated in the detail section")
+        XCTAssertEqual(SecondaryProviderRow(provider: .claude, snapshot: snap, now: now,
+                                            onTap: {}).summary,
+                       "97% of weekly · resets Aug 20 at 12:05pm")
+    }
+
+    /// Priority is constraint-based, not an unconditional preference for weekly: when the
+    /// session is closer to exhaustion it remains the headline allowance.
+    func testClaudeSessionLimitStillHeadlinesWhenItHasLessHeadroomThanTheWeek() {
+        var snap = snapshot(windowTokens: 80_000_000, cap: 100_000_000, windowActive: true)
+        snap.live = LiveUsage(sessionPct: 80, sessionResetText: "7:39pm",
+                              weeklyPct: 50, weeklyResetText: "Aug 20 at 12:05pm",
+                              capturedAt: now)
+
+        XCTAssertEqual(snap.quotaLeft(now: now)?.pct, 20)
+        XCTAssertEqual(snap.quotaLeft(now: now)?.period, .session)
+        XCTAssertNil(snap.secondaryClaudeSessionQuota(now: now),
+                     "the session allowance must not be duplicated when it is already the hero")
+        XCTAssertTrue(snap.showsWeeklyDetail(now: now),
+                      "weekly remains the secondary readout while session owns the hero")
+        XCTAssertEqual(label(snap).claudeFigure, "20%")
+    }
+
+    /// Weekly accumulates over seven days, so comparing raw percentages would let an ordinary
+    /// mid-week reading displace the actionable 5-hour runway almost all week. It participates
+    /// only once it reaches the existing near-limit threshold.
+    func testHealthyWeeklyUsageDoesNotDisplaceTheSessionHero() {
+        var snap = snapshot(windowTokens: 10_000_000, cap: 100_000_000, windowActive: true)
+        snap.live = LiveUsage(sessionPct: 10, sessionResetText: "7:39pm",
+                              weeklyPct: 40, weeklyResetText: "Aug 20 at 12:05pm",
+                              capturedAt: now)
+
+        XCTAssertEqual(snap.quotaLeft(now: now)?.period, .session)
+        XCTAssertEqual(snap.quotaLeft(now: now)?.pct, 90)
+
+        snap.live?.weeklyPct = 70
+        XCTAssertEqual(snap.quotaLeft(now: now)?.period, .weekly,
+                       "70% is the explicit weekly takeover floor")
+        XCTAssertEqual(snap.quotaLeft(now: now)?.pct, 30)
+    }
+
+    /// If /usage supplies only a weekly allowance, it remains the best authoritative reading;
+    /// the takeover floor is solely for choosing between two different periods.
+    func testHealthyWeeklyUsageCanHeadlineWhenNoSessionReadingExists() {
+        var snap = snapshot(windowTokens: 10_000_000, cap: 100_000_000, windowActive: true)
+        snap.live = LiveUsage(weeklyPct: 40, weeklyResetText: "Aug 20 at 12:05pm",
+                              capturedAt: now)
+
+        XCTAssertEqual(snap.quotaLeft(now: now)?.period, .weekly)
+        XCTAssertEqual(snap.quotaLeft(now: now)?.pct, 60)
+    }
+
+    /// A missed helper run invalidates both server readings together. The persisted local cap
+    /// remains the honest fallback; an old 97% week must not stay red forever after it resets.
+    func testStaleWeeklyLimitFallsBackToTheLocalSessionCap() {
+        var snap = snapshot(windowTokens: 10_000_000, cap: 100_000_000, windowActive: true)
+        snap.live = LiveUsage(sessionPct: 4, weeklyPct: 97,
+                              capturedAt: now.addingTimeInterval(-361))
+
+        let quota = snap.quotaLeft(now: now)
+        XCTAssertEqual(quota?.pct, 90)
+        XCTAssertEqual(quota?.source, .cap)
+        XCTAssertEqual(quota?.period, .session)
+    }
+
+    func testInactiveCapSummaryRemainsIdleInsteadOfInventingAZeroPercentSession() {
+        let snap = snapshot(claudeToday: 1_000, windowTokens: 0, cap: 100_000_000,
+                            windowActive: false)
+        XCTAssertEqual(SecondaryProviderRow(provider: .claude, snapshot: snap, now: now,
+                                            onTap: {}).summary,
+                       "no active window")
+    }
+
     // MARK: - When the dual label engages
 
     func testDualLabelOnlyWhenBothProvidersHaveUsage() {

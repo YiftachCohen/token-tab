@@ -18,8 +18,8 @@
 //
 // In its own pair Codex shows whichever official window it published — 5h when there is one,
 // else the weekly-only allowance current Codex builds emit — because that pair is Codex's own
-// slot, not a comparison. Only the single `.headline` figure stays 5h-only, since that one IS
-// a comparison against Claude's 5h % (the 2026-08-02 DESIGN.md row).
+// slot, not a comparison. The single `.headline` figure keeps Codex's 5h-only contract; Claude
+// contributes its 5h allowance unless weekly is both near-limit and more pressured.
 //
 // The glyph is drawn as an NSImage (not a SwiftUI Shape) for historical reasons: under
 // MenuBarExtra, custom shape-drawing was dropped in the status item, which is why the ring
@@ -98,7 +98,7 @@ struct MenuBarLabel: View {
     /// 100% would be noise, and it keeps a Claude-only bar byte-identical to `.headline`.
     var showsBoth: Bool { scope == .both && snapshot.bothProvidersHaveUsage }
 
-    /// The provider under most 5h-quota pressure, recomputed only when the snapshot ticks
+    /// The provider under most real quota pressure, recomputed only when the snapshot ticks
     /// (30s) — no intra-tick flapping. Codex only wins when it has usage AND a higher REAL %.
     private var headline: Provider { snapshot.headlineProvider(now: now) }
     private var isCodex: Bool { headline == .codex }
@@ -128,7 +128,7 @@ struct MenuBarLabel: View {
     var claudeFigure: String {
         switch snapshot.mode {
         case .subscription:
-            if let q = snapshot.quotaLeft(now: now) { return "\(q.pct)%" }
+            if let q = snapshot.quotaLeft(now: now) { return claudeQuotaFigure(q) }
             let w = snapshot.agg.window
             if w.active { return Fmt.durationCompact(w.secondsToReset(now: now)) }
             let today = snapshot.claudeToday
@@ -146,12 +146,18 @@ struct MenuBarLabel: View {
     /// OWN slot, so it shows whichever official window Codex actually published — the 5h
     /// allowance when there is one, else the weekly-only one, exactly as the dropdown's Codex
     /// row and panel do. (`codexLeftPct` is the 5h-only reading, and it stays 5h-only where it
-    /// belongs: `headlineProvider`, where a weekly % must never be compared with Claude's 5h %.
+    /// belongs: `headlineProvider`, where Codex keeps its existing primary-window contract.
     /// Using it here is what made a weekly-only Codex — the current OpenAI shape — fall all the
     /// way through to a token count in the bar while the panel showed a percentage.)
     var codexFigure: String {
         if let left = snapshot.codexDisplayLeftPct(now: now) { return "\(left)%" }
         return Fmt.abbrev(snapshot.codex?.today ?? 0)
+    }
+
+    /// Weekly needs a compact period marker because a bare percentage otherwise looks like the
+    /// normal 5-hour reading. Session keeps the established byte-for-byte figure.
+    private func claudeQuotaFigure(_ quota: ClaudeQuota) -> String {
+        "\(quota.pct)%\(quota.period == .weekly ? " wk" : "")"
     }
 
     // MARK: - Single label (the max-pressure headline)
@@ -187,7 +193,7 @@ struct MenuBarLabel: View {
     private var codexRingFraction: Double { Double(snapshot.codexDisplayLeftPct(now: now) ?? 0) / 100 }
 
     var text: String {
-        // Codex focus: the official 5h window as "% LEFT" — the same reading as Claude's %
+        // Codex focus: the official 5h window as "% LEFT" — the same display direction as Claude's %
         // and as the ring beside it — with a "Cdx" suffix so a lone glyph is still
         // unambiguous (8% of the window spent reads "92% Cdx"). Codex always has a real % here.
         if isCodex, let left = snapshot.codexLeftPct(now: now) { return "\(left)% Cdx" }
@@ -195,7 +201,7 @@ struct MenuBarLabel: View {
         case .subscription:
             // A "%" only when it's a real quota % (live or cap). Otherwise show the time left
             // ("1h44") — honest about being a clock, never elapsed-time wearing a percent sign.
-            if let q = snapshot.quotaLeft(now: now) { return "\(q.pct)%" }
+            if let q = snapshot.quotaLeft(now: now) { return claudeQuotaFigure(q) }
             let w = snapshot.agg.window
             if w.active { return Fmt.durationCompact(w.secondsToReset(now: now)) }
             // No Claude runway either — fall back to combined today-tokens (both-empty case).
