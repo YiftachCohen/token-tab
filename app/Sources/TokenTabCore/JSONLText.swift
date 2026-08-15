@@ -1,13 +1,15 @@
 // Token Tab — how a JSONL file is cut into lines.
 //
 // PURE: string in, lines out — no I/O. Shared by both readers (Claude + Codex) so the
-// app cuts lines exactly where the JS engine does, and only there.
+// app cuts lines exactly where the JS engine does, and only there. JS twin: `src/jsonl.mjs`.
 //
-// This exists because Foundation's line-breaking is Unicode-aware and the JS engine's is
-// not. `String.enumerateLines` (and `Character.isNewline`, and `String.split(whereSeparator:
+// This exists because Foundation's line-breaking is Unicode-aware and JSONL's is not.
+// `String.enumerateLines` (and `Character.isNewline`, and `String.split(whereSeparator:
 // \.isNewline)`) use the Unicode line-boundary set: LF, CR, CRLF **plus U+0085 NEL,
-// U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR**. Node's readline splits on
-// `/\r?\n|\r(?!\n)/` — ASCII newlines only.
+// U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR**. JSONL is cut on ASCII newlines
+// only. (Node's `readline` used to be, so the JS engine borrowed its rule; as of Node 24
+// it breaks on U+2028/U+2029 too, and `src/jsonl.mjs` now scans explicitly — both engines
+// state the rule rather than inherit it.)
 //
 // Those three extra separators appear inside real log lines: `JSON.stringify` emits them
 // raw rather than escaping them, so any assistant turn that quotes a file containing one

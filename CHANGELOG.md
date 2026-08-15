@@ -79,10 +79,16 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
   `providers.<p>.lastHour`, pinned by `test/fixtures/parity/last-hour-burn-rate.json`.
 - **`thisWeek` no longer loses an hour in a zone that springs forward at midnight.** The local
   week start is re-derived at local midnight instead of by subtracting fixed days.
-- **Swift cuts JSONL on ASCII newlines only** (new `JSONLText`, shared by both log readers and
-  `EnvFile`). Foundation's Unicode line-breaking split records containing U+0085 / U+2028 /
-  U+2029 into undecodable fragments, silently dropping tokens the CLI counted — a real
-  two-engine divergence.
+- **Both engines now cut JSONL on ASCII newlines only, by their own rule.** Foundation's
+  Unicode line-breaking split records containing U+0085 / U+2028 / U+2029 into undecodable
+  fragments, silently dropping tokens — fixed by a new shared `JSONLText` behind both Swift log
+  readers and `EnvFile`. The CLI had borrowed the same rule from Node's `readline`, which as of
+  **Node 24** breaks on U+2028/U+2029 too: on a current runtime the CLI silently dropped exactly
+  the records the app had just been taught to keep (a turn quoting minified JS or exported JSON
+  is the usual source). Both readers now stream through an explicit scan (`src/jsonl.mjs`, the
+  JS twin of `JSONLText`), so the rule is stated in each engine rather than inherited from a
+  runtime. CI's Node matrix now runs through the newest release instead of stopping at the
+  current LTS, which is why this reached a tag at all.
 - **The CLI's menu-bar percentage is rounded and clamped like the app's**, so one Mac can't get
   `◧ 35.900000000000006% Cdx` from one front-end and `36%` from the other.
 - **Clicks land anywhere on the menu-bar label.** The custom SwiftUI label now ignores AppKit

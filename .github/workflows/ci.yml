@@ -15,7 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        # Through the newest release, not just the oldest supported one: the Release
+        # workflow runs `node --test` on whatever node macos-latest ships, so a matrix
+        # that stopped at the current LTS let a runtime change (Node 24's readline began
+        # breaking lines on U+2028/U+2029) pass CI and fail the tag.
+        node: [18, 20, 22, 24, 26]
         tz: [UTC]
         include:
           - { node: 22, tz: Pacific/Auckland }
