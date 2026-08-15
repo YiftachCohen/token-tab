@@ -193,7 +193,8 @@ struct MenuBarLabelHost: View {
 
     var body: some View {
         MenuBarLabel(snapshot: store.snapshot, menuMetric: store.menuMetric,
-                     scope: store.menuBarScope, now: store.clock, selected: selection.isOpen)
+                     scope: store.menuBarScope, now: store.clock,
+                     isLoading: !store.hasLoadedOnce, selected: selection.isOpen)
             .padding(.horizontal, 5)
             .fixedSize()
     }

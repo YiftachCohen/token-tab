@@ -42,19 +42,39 @@ struct MenuBarLabel: View {
     let menuMetric: MenuMetric
     var scope: MenuBarScope = .both
     var now: Date = Date()
+    /// The first aggregate is still being assembled. An empty snapshot is a useful internal
+    /// default, but "0.0M" is not an honest reading to put in the menu bar before that work
+    /// completes.
+    var isLoading = false
     /// True while the dropdown is open, i.e. while the status item is painting the system
     /// selection fill behind this label. Set by StatusItemController, not by SwiftUI.
     var selected: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 8) {
-            if showsBoth {
-                pair(glyph: claudeGlyph, text: claudeFigure)
-                pair(glyph: codexGlyph, text: codexFigure)
+        Group {
+            if isLoading {
+                loadingLabel
             } else {
-                pair(glyph: glyph, text: text)
+                HStack(spacing: 8) {
+                    if showsBoth {
+                        pair(glyph: claudeGlyph, text: claudeFigure)
+                        pair(glyph: codexGlyph, text: codexFigure)
+                    } else {
+                        pair(glyph: glyph, text: text)
+                    }
+                }
             }
         }
+    }
+
+    /// Keep the first-load state to the brand mark alone: a status-bar loader needs to signal
+    /// activity, not temporarily become a second label. The mark is vector-drawn and rotates as
+    /// one composited transform, so it stays smooth without redrawing the status item.
+    private var loadingLabel: some View {
+        MenuBarLoadingMark(reduceMotion: reduceMotion)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(loadingAccessibilityLabel)
     }
 
     /// One provider's reading: its ring/dot, then its figure. 5pt is the original glyph-to-
@@ -71,6 +91,8 @@ struct MenuBarLabel: View {
             .font(.system(size: 12, weight: .semibold).monospacedDigit())
             .foregroundStyle(selected ? Theme.onMenuSelection : Color.primary)
     }
+
+    var loadingAccessibilityLabel: String { "Loading Token Tab usage" }
 
     /// Show a pair per provider only when both actually have usage — a lone ring stuck at
     /// 100% would be noise, and it keeps a Claude-only bar byte-identical to `.headline`.
@@ -185,6 +207,24 @@ struct MenuBarLabel: View {
             case .tokens: return Fmt.millions(snapshot.agg.today)
             }
         }
+    }
+}
+
+/// The menu-bar-sized form of `BrandMark`: all familiar ring language, no generic spinner
+/// chrome or transient text. Its rotation is a vector-layer transform rather than a sequence of
+/// new `NSImage`s, which is the difference between a clean orbit and visible stepping here.
+private struct MenuBarLoadingMark: View {
+    let reduceMotion: Bool
+    @State private var rotating = false
+
+    var body: some View {
+        BrandMark(size: 13, lineWidth: 2, fraction: 0.30, color: Theme.green, trackOpacity: 0.16)
+            .rotationEffect(.degrees(rotating ? 360 : 0))
+            .animation(reduceMotion ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false),
+                       value: rotating)
+            .onAppear { rotating = !reduceMotion }
+            .onChange(of: reduceMotion) { rotating = !$0 }
+            .frame(width: 13, height: 13)
     }
 }
 
