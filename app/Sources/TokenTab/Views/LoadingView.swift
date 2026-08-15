@@ -8,12 +8,14 @@
 // reads. Honors Reduce Motion (static arc, no rolling) and adapts to light/dark via Theme.
 
 import SwiftUI
-import Combine
 import TokenTabCore
 
 struct LoadingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
+    /// When this loader came on screen — the tally climbs from zero relative to it, so the
+    /// count starts where the read starts instead of mid-roll at an arbitrary clock phase.
+    @State private var start = Date()
 
     /// The app narrating its work — cycles while the logs are read.
     private let lines = ["Reading ~/.claude…", "Counting tokens…", "Tallying the week…", "Almost there…"]
@@ -22,7 +24,7 @@ struct LoadingView: View {
         Group {
             if reduceMotion {
                 // Static: a calm arc + the lines. No motion, no rolling tally.
-                content(rotation: 0, sweep: 0.30, breath: 0.5, rolling: false, line: lines[0], lineOpacity: 1)
+                content(rotation: 0, sweep: 0.30, breath: 0.5, tally: nil, line: lines[0], lineOpacity: 1)
             } else {
                 TimelineView(.animation) { ctx in
                     let t = ctx.date.timeIntervalSinceReferenceDate
@@ -38,7 +40,8 @@ struct LoadingView: View {
                     let lineOpacity = min(1, min(local, 1 - local) * 7)
 
                     content(rotation: rotation, sweep: sweep, breath: breath,
-                            rolling: true, line: lines[idx], lineOpacity: lineOpacity)
+                            tally: RollingTally.value(at: ctx.date.timeIntervalSince(start)),
+                            line: lines[idx], lineOpacity: lineOpacity)
                 }
             }
         }
@@ -54,9 +57,9 @@ struct LoadingView: View {
     }
 
     private func content(rotation: Double, sweep: Double, breath: Double,
-                         rolling: Bool, line: String, lineOpacity: Double) -> some View {
+                         tally: Int?, line: String, lineOpacity: Double) -> some View {
         VStack(spacing: 30) {
-            ScanningGauge(rotation: rotation, sweep: sweep, breath: breath, rolling: rolling)
+            ScanningGauge(rotation: rotation, sweep: sweep, breath: breath, tally: tally)
             VStack(spacing: 7) {
                 Text(line)
                     .font(.system(size: 12, weight: .medium)).tracking(0.2)
@@ -75,7 +78,8 @@ private struct ScanningGauge: View {
     var rotation: Double
     var sweep: Double
     var breath: Double
-    var rolling: Bool
+    /// The tally to show in the center, or nil under Reduce Motion.
+    var tally: Int?
     var size: CGFloat = 50
     var lineWidth: CGFloat = 3.5
 
@@ -108,9 +112,9 @@ private struct ScanningGauge: View {
                 .rotationEffect(.degrees(-90 + rotation))
                 .shadow(color: Theme.green.opacity(0.4), radius: 2.5)
 
-            // Center: the token tally, rolling up like an odometer (or static under Reduce Motion).
-            if rolling {
-                RollingTally()
+            // Center: the token tally, rolling up like an odometer (absent under Reduce Motion).
+            if let tally {
+                RollingTally(value: tally)
             }
         }
         .frame(width: size, height: size)
@@ -118,25 +122,39 @@ private struct ScanningGauge: View {
 }
 
 /// The center figure: a token count that climbs toward ~188M in decelerating steps and loops,
-/// each step rolling its digits via `.numericText()`. Self-contained (own ticker) so the roll
-/// is a real per-step animation rather than a 60fps re-render that wouldn't animate.
+/// each step rolling its digits via `.numericText()`. The value is a pure function of the
+/// enclosing `TimelineView`'s clock — a self-owned `Timer` would be re-created and re-subscribed
+/// by every 60fps re-render of that timeline, restarting its interval before it could ever fire,
+/// so the tally sat at 0 for the whole load.
 private struct RollingTally: View {
-    @State private var value = 0
-    private let ticker = Timer.publish(every: 0.11, on: .main, in: .common).autoconnect()
+    var value: Int
 
     var body: some View {
         Text(Fmt.abbrev(value))
             .font(Theme.figure(14, weight: .semibold))
             .foregroundStyle(Theme.green)
             .contentTransition(.numericText())
-            .onReceive(ticker) { _ in
-                // Ease-out climb: each step covers a fraction of the remaining distance, so the
-                // digits roll fast at first and settle near the top, then loop.
-                let target = 200_000_000
-                let next = value + max(2_000_000, (target - value) / 7)
-                withAnimation(.snappy(duration: 0.18)) {
-                    value = next >= 188_000_000 ? 0 : next
-                }
-            }
+            .animation(.snappy(duration: 0.18), value: value)
+    }
+
+    /// One step every 110ms — fast enough to read as an odometer, slow enough to see the digits.
+    private static let interval = 0.11
+
+    /// Ease-out climb: each step covers a fraction of the remaining distance, so the digits roll
+    /// fast at first and settle near the top before the sequence loops back to zero (~2.2s).
+    private static let steps: [Int] = {
+        var out = [0]
+        var v = 0
+        while true {
+            v += max(2_000_000, (200_000_000 - v) / 7)
+            if v >= 188_000_000 { return out }
+            out.append(v)
+        }
+    }()
+
+    /// `elapsed` is seconds since the loader appeared; clamped so a frame timestamped a hair
+    /// before that can't index backwards off the front of the sequence.
+    static func value(at elapsed: TimeInterval) -> Int {
+        steps[Int(max(0, elapsed) / interval) % steps.count]
     }
 }
