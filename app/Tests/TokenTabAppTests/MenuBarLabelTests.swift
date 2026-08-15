@@ -106,6 +106,13 @@ final class MenuBarLabelTests: XCTestCase {
         XCTAssertFalse(label(snap, scope: .headline).showsBoth)
     }
 
+    func testInitialLoadUsesAnHonestStatusLabelInsteadOfEmptyTokens() {
+        let initial = MenuBarLabel(snapshot: .empty, menuMetric: .tokens, now: now, isLoading: true)
+        XCTAssertEqual(initial.text, "0.0M", "the internal empty snapshot still represents no data")
+        XCTAssertEqual(initial.loadingAccessibilityLabel, "Loading Token Tab usage",
+                       "the compact visual loader must still describe the pending read")
+    }
+
     // MARK: - Honest fallbacks
 
     /// A ring asserts "I know a percentage". Codex with usage but no rate-limits reading has
