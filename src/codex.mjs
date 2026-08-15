@@ -15,10 +15,10 @@
 // incl. session_meta.instructions and cwd, have no code path out). The
 // no-content test pins both halves.
 
-import { createReadStream, readdirSync, statSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { jsonlLines } from "./jsonl.mjs";
 
 /** Codex root dir: $TOKENTAB_CODEX_LOG_DIR > $CODEX_HOME > ~/.codex.
  * This is the ROOT — `sessions/` and `archived_sessions/` are subdirs. */
@@ -210,8 +210,7 @@ export function recordsFromCodexLines(lines, { fileName } = {}) {
 async function readCodexFile(path) {
   const lines = [];
   try {
-    const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
-    for await (const line of rl) lines.push(line);
+    for await (const line of jsonlLines(path)) lines.push(line);
   } catch {
     // File vanished / unreadable mid-read — fold whatever we got. A partial
     // trailing line just counts as malformed.

@@ -13,10 +13,10 @@
 //
 // Log dir resolution: $TOKENTAB_LOG_DIR  >  $CLAUDE_CONFIG_DIR/projects  >  ~/.claude/projects
 
-import { createReadStream, readdirSync, statSync, existsSync, readFileSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { jsonlLines } from "./jsonl.mjs";
 import { aggregate, recordFromLine, classifySurface } from "./core.mjs";
 import { costOfUsage } from "./pricing.mjs";
 import { readCodexUsage, resolveCodexRoot, findCodexJsonl } from "./codex.mjs";
@@ -106,8 +106,7 @@ async function readRecords(files) {
   for (const path of files) {
     let lineNo = 0;
     try {
-      const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
-      for await (const line of rl) {
+      for await (const line of jsonlLines(path)) {
         lineNo++;
         if (!line.trim()) continue;
         let obj;

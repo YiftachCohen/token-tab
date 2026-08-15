@@ -128,6 +128,44 @@ test("no-content: response_item lines are skipped before JSON.parse; instruction
   assert.ok(!blob.includes("/secret/path"), "no cwd must leak");
 });
 
+// A raw U+2028 / U+2029 inside a rollout line is ONE line of JSONL — but it IS a line
+// break to a Unicode-aware splitter, which is what `readline` became in Node 24. A
+// `session_meta`'s `instructions` embeds file content, so this is the shape that occurs:
+// split it, and every fragment is truncated JSON, the session's token counts vanish, and
+// the app (whose `JSONLText` cuts on ASCII newlines only) and the CLI disagree on the same
+// file. Claude-side twin: io.test.mjs "a record containing U+2028/U+2029/U+0085 stays ONE
+// record". Swift twin: IOLayerTests.testParseFileTreatsUnicodeSeparatorsAsLineContent.
+test("readCodexUsage: a line containing U+2028/U+2029 is not cut into fragments", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-sep-"));
+  try {
+    const dir = join(root, "sessions", "2026", "06", "20");
+    mkdirSync(dir, { recursive: true });
+    const separators = `before${String.fromCharCode(0x2028)}after${String.fromCharCode(0x2029)}end`;
+    const lines = [
+      { type: "session_meta", timestamp: "2026-06-20T10:00:00.000Z",
+        payload: { id: "019ee570-0000-7000-8000-000000000000", instructions: separators } },
+      { type: "turn_context", payload: { model: "gpt-5.4" } },
+      { type: "event_msg", timestamp: "2026-06-20T10:01:00.000Z",
+        payload: { type: "token_count",
+                   info: { total_token_usage: { input_tokens: 300, cached_input_tokens: 100, output_tokens: 40, total_tokens: 340 } },
+                   rate_limits: null } },
+    ].map((o) => JSON.stringify(o));
+    assert.ok(lines[0].includes(String.fromCharCode(0x2028)), "JSON.stringify must emit the separator RAW");
+    assert.ok(lines.every((l) => !l.includes("\n")), "each fixture line must be one physical line");
+    writeFileSync(join(dir, "rollout-2026-06-20T10-00-00-019ee570-0000-7000-8000-000000000000.jsonl"),
+                  lines.join("\n") + "\n");
+    const out = await readCodexUsage(root);
+    assert.equal(out.malformed, 0, "no fragment may be counted as a malformed line");
+    assert.equal(out.records.length, 1);
+    assert.equal(out.records[0].model, "gpt-5.4", "the turn_context still applies");
+    assert.equal(out.records[0].usage.input_tokens, 200, "300 total input - 100 cached");
+    assert.equal(out.records[0].usage.cache_read_input_tokens, 100);
+    assert.equal(out.records[0].usage.output_tokens, 40);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // --- config resolution ------------------------------------------------------
 
 test("resolveCodexRoot precedence: TOKENTAB_CODEX_LOG_DIR > CODEX_HOME > ~/.codex", () => {
