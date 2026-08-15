@@ -15,8 +15,6 @@
 import Foundation
 
 public struct Pricing: CostModel {
-    public init() {}
-
     private struct CacheMult { let write: Double; let read: Double }
 
     // Per-provider cache multipliers, relative to each model's own input rate (design
@@ -134,6 +132,40 @@ public struct Pricing: CostModel {
 
     private struct ClassRates { let input, cacheWrite, cacheRead, output: Double }
 
+    /// Rate resolution canonicalizes model ids with regular expressions. A typical log has only
+    /// a few model/provider pairs but many thousands of records, so retain both priced and
+    /// unpriced resolutions for the life of this `Pricing` value — one aggregate()/dailyHistory()
+    /// pass, since callers make a fresh `Pricing()` per run. The lock makes a value safe to share
+    /// between the detached refresh and any future concurrent caller.
+    private struct ResolutionKey: Hashable {
+        let model: String
+        let provider: String
+    }
+    private enum CachedResolution {
+        case priced(ClassRates)
+        case unpriced
+    }
+    private final class ResolutionCache: @unchecked Sendable {
+        let lock = NSLock()
+        var values: [ResolutionKey: CachedResolution] = [:]
+        /// Misses only — how often the rate table was actually consulted.
+        var resolutions = 0
+    }
+    private let resolutionCache: ResolutionCache
+
+    public init() {
+        resolutionCache = ResolutionCache()
+    }
+
+    /// Test-visible accounting for the performance invariant: repeated records for the same
+    /// model/provider pair consult the rate table only once. Counts resolutions rather than
+    /// cache entries, so an implementation that fills the cache but ignores it still fails.
+    var rateResolutionCount: Int {
+        resolutionCache.lock.lock()
+        defer { resolutionCache.lock.unlock() }
+        return resolutionCache.resolutions
+    }
+
     private static func ratesFor(_ model: String, provider: String) -> ClassRates? {
         let id = canonicalModelId(model, provider: provider)
         let rateTable = rates(for: provider)
@@ -147,10 +179,29 @@ public struct Pricing: CostModel {
                           output: base.output)
     }
 
+    private func cachedRatesFor(_ model: String, provider: String) -> ClassRates? {
+        let key = ResolutionKey(model: model, provider: provider)
+        resolutionCache.lock.lock()
+        defer { resolutionCache.lock.unlock() }
+        if let cached = resolutionCache.values[key] {
+            switch cached {
+            case .priced(let rates): return rates
+            case .unpriced: return nil
+            }
+        }
+        resolutionCache.resolutions += 1
+        guard let rates = Pricing.ratesFor(model, provider: provider) else {
+            resolutionCache.values[key] = .unpriced
+            return nil
+        }
+        resolutionCache.values[key] = .priced(rates)
+        return rates
+    }
+
     /// `provider` selects the canonicalizer + rate table + cache multipliers (default
     /// "claude", matching aggregate()'s "absent provider ⇒ claude" convention).
     public func cost(_ usage: TokenUsage, model: String, provider: String = "claude") -> (usd: Double, priced: Bool) {
-        guard let r = Pricing.ratesFor(model, provider: provider) else { return (0, false) }
+        guard let r = cachedRatesFor(model, provider: provider) else { return (0, false) }
         let usd = (Double(usage.input) * r.input
                    + Double(usage.cacheCreate) * r.cacheWrite
                    + Double(usage.cacheRead) * r.cacheRead
