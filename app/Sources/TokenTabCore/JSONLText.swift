@@ -23,6 +23,8 @@
 // is a grapheme cluster and "\r\n" is a SINGLE Character, so splitting on "\n" silently
 // fails to break a CRLF file at all. Hence the scalar-level walk.
 
+import Foundation
+
 public enum JSONLText {
     /// Cut JSONL text into non-empty lines on ASCII newlines (LF, CR, CRLF) only.
     public static func lines(_ text: String) -> [String] {
@@ -42,5 +44,50 @@ public enum JSONLText {
         }
         if !current.isEmpty { out.append(String(current)) }
         return out
+    }
+
+    /// The byte-level twin of `lines(_:)`, for file data read (or mapped) straight from disk.
+    ///
+    /// Cuts `data` from `offset` on the same ASCII newlines (LF, CR, CRLF) — 0x0A/0x0D bytes
+    /// never occur inside a multi-byte UTF-8 sequence, so a byte scan cuts exactly where the
+    /// scalar walk does — and decodes each line lossily (U+FFFD for damaged bytes), matching
+    /// `String(decoding:as:)` over the whole file. Two things `lines(_:)` can't offer:
+    ///
+    /// - No whole-file `String` copy: only the individual lines are materialized, so parsing a
+    ///   large log costs one file-backed buffer plus a line at a time, not 2× the file in dirty
+    ///   memory.
+    /// - Incremental consumption: `consumed` is the offset just past the last newline byte —
+    ///   only COMPLETE lines are consumed, and the trailing not-yet-terminated fragment (a line
+    ///   still being appended) comes back separately as `partial`. A caller that resumes from
+    ///   `consumed` next time re-sees that fragment once its terminator arrives, whole.
+    ///
+    /// `offset` must lie on a line boundary of the SAME content (0, or a previous `consumed`).
+    /// For any full read, `lines + [partial]` equals `lines(_:)` of the decoded text.
+    public static func completeLines(in data: Data, from offset: Int)
+        -> (lines: [String], consumed: Int, partial: String?) {
+        let count = data.count
+        guard offset < count else { return ([], min(offset, count), nil) }
+        var lines: [String] = []
+        var consumed = offset
+        var partial: String? = nil
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            let buf = raw.bindMemory(to: UInt8.self)
+            var start = offset
+            for i in offset..<count {
+                let b = buf[i]
+                guard b == 0x0A || b == 0x0D else { continue }
+                if i > start {
+                    lines.append(String(decoding: UnsafeBufferPointer(rebasing: buf[start..<i]),
+                                        as: UTF8.self))
+                }
+                start = i + 1
+                consumed = i + 1
+            }
+            if start < count {
+                partial = String(decoding: UnsafeBufferPointer(rebasing: buf[start..<count]),
+                                 as: UTF8.self)
+            }
+        }
+        return (lines, consumed, partial)
     }
 }

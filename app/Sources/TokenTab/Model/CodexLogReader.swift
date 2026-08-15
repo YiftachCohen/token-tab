@@ -177,19 +177,36 @@ enum CodexLogReader {
         var rateLimits: CodexRateLimitsSnapshot?
     }
 
-    /// Pure per-file fold (spec §2). Takes the file's lines and returns the emitted
-    /// UsageRecords (provider "codex") plus the latest rate_limits snapshot. Kept pure
-    /// (lines-in) so it is trivially fixture-testable, exactly like recordsFromCodexLines.
-    static func recordsFromLines(_ lines: [String], fileName: String?) -> FileResult {
-        var records: [UsageRecord] = []
-        var malformed = 0
+    /// The carry between two parses of the SAME file — everything the per-file fold tracks
+    /// across lines. A Codex file can't be tail-parsed statelessly the way a Claude one can:
+    /// `total_token_usage` is cumulative, so resuming without the baselines would recount the
+    /// whole session as one giant delta (and lose the session id / current model the earlier
+    /// lines established). RecordCache stores one of these per Codex file and hands it back
+    /// for the appended tail. A fresh `FoldState()` + whole file ≡ the old one-shot fold.
+    struct FoldState: Sendable {
         // Per-class running baselines. total_tokens is NEVER used for arithmetic.
         var prevInput = 0, prevCached = 0, prevOutput = 0
         var sessionId: String? = nil
         var currentModel: String? = nil
         var seq = 0
         var rateLimits: CodexRateLimitsSnapshot? = nil   // file's latest, by asOf
-        var rateLimitsAsOf: Date? = nil
+        init() {}
+    }
+
+    /// Pure per-file fold (spec §2). Takes the file's lines and returns the emitted
+    /// UsageRecords (provider "codex") plus the latest rate_limits snapshot. Kept pure
+    /// (lines-in) so it is trivially fixture-testable, exactly like recordsFromCodexLines.
+    static func recordsFromLines(_ lines: [String], fileName: String?) -> FileResult {
+        var state = FoldState()
+        let (records, malformed) = fold(lines, fileName: fileName, state: &state)
+        return FileResult(records: records, malformed: malformed, rateLimits: state.rateLimits)
+    }
+
+    /// The fold itself, resumable: consumes `lines` continuing from (and advancing) `state`.
+    static func fold(_ lines: [String], fileName: String?,
+                     state: inout FoldState) -> (records: [UsageRecord], malformed: Int) {
+        var records: [UsageRecord] = []
+        var malformed = 0
 
         // shrank ⇒ reset (compaction) ⇒ current value IS the new segment's delta and
         // becomes the new baseline; otherwise ordinary cumulative growth.
@@ -211,29 +228,28 @@ enum CodexLogReader {
 
             switch obj.type {
             case "session_meta":
-                if let id = obj.payload?.id, !id.isEmpty { sessionId = id }
+                if let id = obj.payload?.id, !id.isEmpty { state.sessionId = id }
             case "turn_context":
-                if let model = obj.payload?.model, !model.isEmpty { currentModel = model }
+                if let model = obj.payload?.model, !model.isEmpty { state.currentModel = model }
             case "event_msg" where obj.payload?.type == "token_count":
                 let payload = obj.payload!
                 // rate_limits snapshot (display only — never summed). Latest by ts.
                 if let rl = payload.rate_limits {
-                    rateLimitsAsOf = parseDate(obj.timestamp)
-                    rateLimits = CodexRateLimitsSnapshot(
+                    state.rateLimits = CodexRateLimitsSnapshot(
                         primary: window(rl.primary),
                         secondary: window(rl.secondary),
                         planType: rl.plan_type,
-                        asOf: rateLimitsAsOf)
+                        asOf: parseDate(obj.timestamp))
                 }
                 guard let T = payload.info?.total_token_usage else { continue }  // info occasionally null
 
                 let curInput = T.input_tokens ?? 0
                 let curCached = T.cached_input_tokens ?? 0
                 let curOutput = T.output_tokens ?? 0
-                let dInput = deltaFor(curInput, prevInput)
-                let dCached = deltaFor(curCached, prevCached)
-                let dOutput = deltaFor(curOutput, prevOutput)
-                prevInput = curInput; prevCached = curCached; prevOutput = curOutput
+                let dInput = deltaFor(curInput, state.prevInput)
+                let dCached = deltaFor(curCached, state.prevCached)
+                let dOutput = deltaFor(curOutput, state.prevOutput)
+                state.prevInput = curInput; state.prevCached = curCached; state.prevOutput = curOutput
 
                 // All-zero deltas ⇒ duplicate pair ⇒ emit nothing.
                 if dInput == 0 && dCached == 0 && dOutput == 0 { continue }
@@ -248,21 +264,21 @@ enum CodexLogReader {
                     output: dOutput)
 
                 records.append(UsageRecord(
-                    messageId: "codex:" + (sessionId ?? uuidFromFileName(fileName) ?? "<unknown>"),
-                    requestId: "token:\(seq)",
-                    model: currentModel ?? "<codex-unknown>",
+                    messageId: "codex:" + (state.sessionId ?? uuidFromFileName(fileName) ?? "<unknown>"),
+                    requestId: "token:\(state.seq)",
+                    model: state.currentModel ?? "<codex-unknown>",
                     usage: usage,
                     timestamp: parseDate(obj.timestamp),
                     isSidechain: false,
                     provider: "codex"))
-                seq += 1
+                state.seq += 1
             default:
                 // response_item, task_started, … — ignored WITHOUT decoding content.
                 break
             }
         }
 
-        return FileResult(records: records, malformed: malformed, rateLimits: rateLimits)
+        return (records, malformed)
     }
 
     private static func window(_ w: Line.RateLimits.Window?) -> CodexRateLimitsSnapshot.Window? {
@@ -275,16 +291,39 @@ enum CodexLogReader {
     /// Parse one JSONL file (the per-file unit shared by the one-shot read and the cached
     /// refresh). A vanished/unreadable file is empty (tolerated mid-walk); a partial trailing
     /// line just counts as malformed.
-    /// Lossy UTF-8 decode + ASCII-only line breaking, for the reasons spelled out on
-    /// LogReader.parseFile and in JSONLText: a strict decode threw away a whole file over one
-    /// bad byte, and Foundation's `enumerateLines` cuts a single record into fragments at
-    /// U+2028/U+2029/U+0085, none of which parse. Both readers must cut lines where Node does.
+    /// Lossy per-line UTF-8 decode + ASCII-only byte-level line breaking, for the reasons
+    /// spelled out on LogReader.parseFile and in JSONLText: a strict decode threw away a whole
+    /// file over one bad byte, and Foundation's `enumerateLines` cuts a single record into
+    /// fragments at U+2028/U+2029/U+0085, none of which parse. Both readers must cut lines
+    /// where Node does. `.mappedIfSafe` keeps the file's bytes clean/file-backed (append-only
+    /// logs are never truncated in place, so the mapping cannot go bad).
     static func parseFile(_ url: URL) -> FileResult {
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
             return FileResult(records: [], malformed: 0, rateLimits: nil)
         }
-        let text = String(decoding: data, as: UTF8.self)
-        return recordsFromLines(JSONLText.lines(text), fileName: url.lastPathComponent)
+        var state = FoldState()
+        let fileName = url.lastPathComponent
+        let cut = JSONLText.completeLines(in: data, from: 0)
+        var (records, malformed) = fold(cut.lines, fileName: fileName, state: &state)
+        if let p = cut.partial {   // a final line with no trailing newline still counts
+            let tail = fold([p], fileName: fileName, state: &state)
+            records += tail.records
+            malformed += tail.malformed
+        }
+        return FileResult(records: records, malformed: malformed, rateLimits: state.rateLimits)
+    }
+
+    /// Incremental twin of `parseFile` for RecordCache: folds only the COMPLETE lines of
+    /// `data` from `offset`, continuing from (and advancing) `state`. `consumed` is where the
+    /// next tail parse resumes; `partial` is a trailing unterminated line, handed back
+    /// UNCONSUMED — the caller counts it transiently against a COPY of `state` so the cached
+    /// carry never includes a half line (see LogReader.parseComplete for the failure mode).
+    static func parseComplete(_ data: Data, from offset: Int, fileName: String?,
+                              state: inout FoldState)
+        -> (records: [UsageRecord], malformed: Int, consumed: Int, partial: String?) {
+        let cut = JSONLText.completeLines(in: data, from: offset)
+        let (records, malformed) = fold(cut.lines, fileName: fileName, state: &state)
+        return (records, malformed, cut.consumed, cut.partial)
     }
 
     /// Read all Codex usage under `root`. `codexRateLimits` is the globally latest snapshot

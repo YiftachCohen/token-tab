@@ -66,13 +66,15 @@ Reading the whole log history on every launch took seconds, so the app keeps a c
 remembers your settings. All of it is inside the app's own sandbox container, and all of
 it is disposable — delete it and the app rebuilds it:
 
-- **A record cache**, at `~/Library/Containers/com.tokentab.TokenTab/Data/Library/Caches/TokenTab/record-cache-v2.json`.
-  Keyed by each log file's absolute path + mtime + size, holding the same token metadata
-  the parser decodes (model id, token counts, timestamps) so an unchanged file is never
-  re-read. It contains **file paths and numbers, never message content** — the cached type
-  is the same `UsageRecord` the parser produces, which has no field for your text. Note
-  that the paths are Claude Code's project directory names, which encode the directories
-  you work in.
+- **A record cache**, at `~/Library/Containers/com.tokentab.TokenTab/Data/Library/Caches/TokenTab/record-cache-v3.jsonl`
+  (plain JSONL — a version header line, then one entry per log file, so you can open it
+  and check the claim). Keyed by each log file's absolute path + mtime + size, holding
+  the same token metadata the parser decodes (model id, token counts, timestamps) so an
+  unchanged file is never re-read — and, since logs are append-only, a grown file is
+  re-parsed only past the byte offset already consumed. It contains **file paths and
+  numbers, never message content** — the cached type is the same `UsageRecord` the
+  parser produces, which has no field for your text. Note that the paths are Claude
+  Code's project directory names, which encode the directories you work in.
 - **Your settings**, in `UserDefaults`: the menu-bar metric and scope, whether Codex is
   enabled, a manual window cap, the cap learned from a live reading, and a display-mode
   override.
