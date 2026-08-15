@@ -207,78 +207,86 @@ enum CodexLogReader {
                      state: inout FoldState) -> (records: [UsageRecord], malformed: Int) {
         var records: [UsageRecord] = []
         var malformed = 0
+        let decoder = JSONDecoder()
+        for rawLine in lines {
+            foldLine(rawLine, fileName: fileName, decoder: decoder,
+                     state: &state, records: &records, malformed: &malformed)
+        }
+        return (records, malformed)
+    }
 
+    /// One line of the fold — the unit the array driver above and the streaming `parseComplete`
+    /// share, so the memory-bound path can parse each line during the byte scan without ever
+    /// collecting the file's decoded text (which, pre-gate, includes `response_item` content).
+    private static func foldLine(_ rawLine: String, fileName: String?, decoder: JSONDecoder,
+                                 state: inout FoldState,
+                                 records: inout [UsageRecord], malformed: inout Int) {
         // shrank ⇒ reset (compaction) ⇒ current value IS the new segment's delta and
         // becomes the new baseline; otherwise ordinary cumulative growth.
         func deltaFor(_ cur: Int, _ base: Int) -> Int { cur >= base ? cur - base : cur }
 
-        let decoder = JSONDecoder()
-        for rawLine in lines {
-            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            // Content gate — BEFORE the decoder. A non-whitelisted type is skipped as a raw
-            // string, so its content is never decoded. Not counted as malformed: it's a
-            // well-formed line we deliberately don't read.
-            if let top = Self.topLevelType(of: trimmed), !Self.decodedTypes.contains(top) { continue }
-            guard let data = trimmed.data(using: .utf8),
-                  let obj = try? decoder.decode(Line.self, from: data) else {
-                malformed += 1   // tolerate half-written / trailing lines
-                continue
-            }
-
-            switch obj.type {
-            case "session_meta":
-                if let id = obj.payload?.id, !id.isEmpty { state.sessionId = id }
-            case "turn_context":
-                if let model = obj.payload?.model, !model.isEmpty { state.currentModel = model }
-            case "event_msg" where obj.payload?.type == "token_count":
-                let payload = obj.payload!
-                // rate_limits snapshot (display only — never summed). Latest by ts.
-                if let rl = payload.rate_limits {
-                    state.rateLimits = CodexRateLimitsSnapshot(
-                        primary: window(rl.primary),
-                        secondary: window(rl.secondary),
-                        planType: rl.plan_type,
-                        asOf: parseDate(obj.timestamp))
-                }
-                guard let T = payload.info?.total_token_usage else { continue }  // info occasionally null
-
-                let curInput = T.input_tokens ?? 0
-                let curCached = T.cached_input_tokens ?? 0
-                let curOutput = T.output_tokens ?? 0
-                let dInput = deltaFor(curInput, state.prevInput)
-                let dCached = deltaFor(curCached, state.prevCached)
-                let dOutput = deltaFor(curOutput, state.prevOutput)
-                state.prevInput = curInput; state.prevCached = curCached; state.prevOutput = curOutput
-
-                // All-zero deltas ⇒ duplicate pair ⇒ emit nothing.
-                if dInput == 0 && dCached == 0 && dOutput == 0 { continue }
-
-                // Canonical class mapping. OpenAI: cached ⊂ input, reasoning ⊂ output —
-                // plain input is input minus cached; output is used as-is (reasoning already
-                // inside it). cacheCreate has no Codex analog.
-                let usage = TokenUsage(
-                    input: max(0, dInput - dCached),
-                    cacheCreate: 0,
-                    cacheRead: dCached,
-                    output: dOutput)
-
-                records.append(UsageRecord(
-                    messageId: "codex:" + (state.sessionId ?? uuidFromFileName(fileName) ?? "<unknown>"),
-                    requestId: "token:\(state.seq)",
-                    model: state.currentModel ?? "<codex-unknown>",
-                    usage: usage,
-                    timestamp: parseDate(obj.timestamp),
-                    isSidechain: false,
-                    provider: "codex"))
-                state.seq += 1
-            default:
-                // response_item, task_started, … — ignored WITHOUT decoding content.
-                break
-            }
+        let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return }
+        // Content gate — BEFORE the decoder. A non-whitelisted type is skipped as a raw
+        // string, so its content is never decoded. Not counted as malformed: it's a
+        // well-formed line we deliberately don't read.
+        if let top = Self.topLevelType(of: trimmed), !Self.decodedTypes.contains(top) { return }
+        guard let data = trimmed.data(using: .utf8),
+              let obj = try? decoder.decode(Line.self, from: data) else {
+            malformed += 1   // tolerate half-written / trailing lines
+            return
         }
 
-        return (records, malformed)
+        switch obj.type {
+        case "session_meta":
+            if let id = obj.payload?.id, !id.isEmpty { state.sessionId = id }
+        case "turn_context":
+            if let model = obj.payload?.model, !model.isEmpty { state.currentModel = model }
+        case "event_msg" where obj.payload?.type == "token_count":
+            let payload = obj.payload!
+            // rate_limits snapshot (display only — never summed). Latest by ts.
+            if let rl = payload.rate_limits {
+                state.rateLimits = CodexRateLimitsSnapshot(
+                    primary: window(rl.primary),
+                    secondary: window(rl.secondary),
+                    planType: rl.plan_type,
+                    asOf: parseDate(obj.timestamp))
+            }
+            guard let T = payload.info?.total_token_usage else { return }  // info occasionally null
+
+            let curInput = T.input_tokens ?? 0
+            let curCached = T.cached_input_tokens ?? 0
+            let curOutput = T.output_tokens ?? 0
+            let dInput = deltaFor(curInput, state.prevInput)
+            let dCached = deltaFor(curCached, state.prevCached)
+            let dOutput = deltaFor(curOutput, state.prevOutput)
+            state.prevInput = curInput; state.prevCached = curCached; state.prevOutput = curOutput
+
+            // All-zero deltas ⇒ duplicate pair ⇒ emit nothing.
+            if dInput == 0 && dCached == 0 && dOutput == 0 { return }
+
+            // Canonical class mapping. OpenAI: cached ⊂ input, reasoning ⊂ output —
+            // plain input is input minus cached; output is used as-is (reasoning already
+            // inside it). cacheCreate has no Codex analog.
+            let usage = TokenUsage(
+                input: max(0, dInput - dCached),
+                cacheCreate: 0,
+                cacheRead: dCached,
+                output: dOutput)
+
+            records.append(UsageRecord(
+                messageId: "codex:" + (state.sessionId ?? uuidFromFileName(fileName) ?? "<unknown>"),
+                requestId: "token:\(state.seq)",
+                model: state.currentModel ?? "<codex-unknown>",
+                usage: usage,
+                timestamp: parseDate(obj.timestamp),
+                isSidechain: false,
+                provider: "codex"))
+            state.seq += 1
+        default:
+            // response_item, task_started, … — ignored WITHOUT decoding content.
+            break
+        }
     }
 
     private static func window(_ w: Line.RateLimits.Window?) -> CodexRateLimitsSnapshot.Window? {
@@ -303,8 +311,9 @@ enum CodexLogReader {
         }
         var state = FoldState()
         let fileName = url.lastPathComponent
-        let cut = JSONLText.completeLines(in: data, from: 0)
-        var (records, malformed) = fold(cut.lines, fileName: fileName, state: &state)
+        let cut = parseComplete(data, from: 0, fileName: fileName, state: &state)
+        var records = cut.records
+        var malformed = cut.malformed
         if let p = cut.partial {   // a final line with no trailing newline still counts
             let tail = fold([p], fileName: fileName, state: &state)
             records += tail.records
@@ -321,8 +330,16 @@ enum CodexLogReader {
     static func parseComplete(_ data: Data, from offset: Int, fileName: String?,
                               state: inout FoldState)
         -> (records: [UsageRecord], malformed: Int, consumed: Int, partial: String?) {
-        let cut = JSONLText.completeLines(in: data, from: offset)
-        let (records, malformed) = fold(cut.lines, fileName: fileName, state: &state)
+        var records: [UsageRecord] = []
+        var malformed = 0
+        let decoder = JSONDecoder()
+        // Enumerated, not collected: each raw line is folded and released during the scan —
+        // the pre-gate raw lines include `response_item` content, which must never sit in
+        // memory as a block (same bound as LogReader.parseComplete).
+        let cut = JSONLText.enumerateCompleteLines(in: data, from: offset) { line in
+            foldLine(line, fileName: fileName, decoder: decoder,
+                     state: &state, records: &records, malformed: &malformed)
+        }
         return (records, malformed, cut.consumed, cut.partial)
     }
 

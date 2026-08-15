@@ -53,21 +53,26 @@ public enum JSONLText {
     /// scalar walk does — and decodes each line lossily (U+FFFD for damaged bytes), matching
     /// `String(decoding:as:)` over the whole file. Two things `lines(_:)` can't offer:
     ///
-    /// - No whole-file `String` copy: only the individual lines are materialized, so parsing a
-    ///   large log costs one file-backed buffer plus a line at a time, not 2× the file in dirty
-    ///   memory.
+    /// - A one-line memory bound: `body` is called with each line DURING the scan, so a caller
+    ///   that parses in place holds one decoded line at a time — never the whole file as a
+    ///   String, and never an array of every line. (That bound is the point: on a cold parse
+    ///   the raw lines include message content, which must not sit in memory as a block.)
     /// - Incremental consumption: `consumed` is the offset just past the last newline byte —
     ///   only COMPLETE lines are consumed, and the trailing not-yet-terminated fragment (a line
     ///   still being appended) comes back separately as `partial`. A caller that resumes from
     ///   `consumed` next time re-sees that fragment once its terminator arrives, whole.
     ///
-    /// `offset` must lie on a line boundary of the SAME content (0, or a previous `consumed`).
-    /// For any full read, `lines + [partial]` equals `lines(_:)` of the decoded text.
-    public static func completeLines(in data: Data, from offset: Int)
-        -> (lines: [String], consumed: Int, partial: String?) {
+    /// `offset` must lie on a line boundary of the SAME content (0, or a previous `consumed`);
+    /// an out-of-range offset is clamped, never trapped — a persisted offset is input data, and
+    /// bad input data must degrade to a re-parse, not a crash.
+    /// For any full read, the lines seen by `body` plus `partial` equal `lines(_:)` of the
+    /// decoded text.
+    public static func enumerateCompleteLines(in data: Data, from offset: Int,
+                                              _ body: (String) -> Void)
+        -> (consumed: Int, partial: String?) {
         let count = data.count
-        guard offset < count else { return ([], min(offset, count), nil) }
-        var lines: [String] = []
+        let offset = min(max(0, offset), count)   // clamp: see doc comment
+        guard offset < count else { return (offset, nil) }
         var consumed = offset
         var partial: String? = nil
         data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
@@ -77,8 +82,8 @@ public enum JSONLText {
                 let b = buf[i]
                 guard b == 0x0A || b == 0x0D else { continue }
                 if i > start {
-                    lines.append(String(decoding: UnsafeBufferPointer(rebasing: buf[start..<i]),
-                                        as: UTF8.self))
+                    body(String(decoding: UnsafeBufferPointer(rebasing: buf[start..<i]),
+                                as: UTF8.self))
                 }
                 start = i + 1
                 consumed = i + 1
@@ -88,6 +93,16 @@ public enum JSONLText {
                                  as: UTF8.self)
             }
         }
-        return (lines, consumed, partial)
+        return (consumed, partial)
+    }
+
+    /// Array-collecting convenience over `enumerateCompleteLines` — for small inputs and
+    /// tests. Real parse paths must use the enumerator: collecting defeats the one-line
+    /// memory bound.
+    public static func completeLines(in data: Data, from offset: Int)
+        -> (lines: [String], consumed: Int, partial: String?) {
+        var lines: [String] = []
+        let r = enumerateCompleteLines(in: data, from: offset) { lines.append($0) }
+        return (lines, r.consumed, r.partial)
     }
 }

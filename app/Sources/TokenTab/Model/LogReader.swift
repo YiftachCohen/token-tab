@@ -128,11 +128,12 @@ enum LogReader {
     /// fresh "line" that parses as garbage while the half stays counted forever.
     static func parseComplete(_ data: Data, from offset: Int)
         -> (records: [UsageRecord], malformed: Int, consumed: Int, partial: String?) {
-        let cut = JSONLText.completeLines(in: data, from: offset)
         var records: [UsageRecord] = []
         var malformed = 0
         let decoder = JSONDecoder()
-        for line in cut.lines {
+        // Enumerated, not collected: each raw line is parsed and released during the scan, so
+        // dirty memory is one line + the records — never the file's decoded text as a block.
+        let cut = JSONLText.enumerateCompleteLines(in: data, from: offset) { line in
             parseLine(line, decoder: decoder, into: &records, malformed: &malformed)
         }
         return (records, malformed, cut.consumed, cut.partial)
@@ -507,6 +508,11 @@ final class RecordCache: @unchecked Sendable {
                 continue
             }
             guard let e = try? decoder.decode(PersistedEntry.self, from: Data(line)) else { continue }
+            // A decoded entry is still INPUT DATA (the store is user-editable by design — we
+            // tell people to open it). An offset outside [0, size] can't be a real parse
+            // position; installing it would feed garbage to the resume paths, so the entry is
+            // dropped and its file simply re-parses.
+            guard e.parsedBytes >= 0, e.parsedBytes <= e.size else { continue }
             cache[e.path] = Entry(mtime: e.mtime, size: e.size, records: e.records, malformed: e.malformed,
                                   provider: e.provider, parsedBytes: e.parsedBytes,
                                   codexState: e.codexState?.state())

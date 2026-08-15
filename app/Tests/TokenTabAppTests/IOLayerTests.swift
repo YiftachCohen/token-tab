@@ -428,6 +428,43 @@ final class IOLayerTests: XCTestCase {
         XCTAssertEqual(out.malformed, 0)
     }
 
+    /// A store entry with an impossible resume offset — the store is user-editable by design,
+    /// so a decoded entry is still input data — is dropped at hydration and its file simply
+    /// re-parses. Before the guard, a negative `parsedBytes` reached the byte scanner (an
+    /// out-of-bounds read); with only the scanner's clamp it would re-parse from 0 on top of
+    /// the cached records, duplicating them — so this pins the exact single-`m1` result.
+    func testPersistentCacheRejectsImpossiblePersistedOffset() throws {
+        let store = dir.appendingPathComponent("record-cache.jsonl")
+        let url = try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
+        _ = RecordCache(storeURL: store).records(for: [fresh("s.jsonl")])
+
+        let size = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as! Int
+        let text = try String(contentsOf: store, encoding: .utf8)
+        XCTAssertTrue(text.contains(#""parsedBytes":\#(size)"#), "test premise: the offset is in the store")
+        try text.replacingOccurrences(of: #""parsedBytes":\#(size)"#, with: #""parsedBytes":-5"#)
+            .write(to: store, atomically: true, encoding: .utf8)
+
+        let out = RecordCache(storeURL: store).records(for: [fresh("s.jsonl")])
+        XCTAssertEqual(out.records.map(\.messageId), ["m1"],
+                       "the poisoned entry was dropped and the file re-parsed — no crash, no duplicates")
+        XCTAssertEqual(out.malformed, 0)
+    }
+
+    /// The scanner's own defense: an out-of-range offset degrades to a bounded scan, never an
+    /// out-of-bounds read (persisted offsets are validated upstream, but bad input data must
+    /// not be able to crash the process from any path).
+    func testCompleteLinesClampsOutOfRangeOffsets() {
+        let data = Data("a\n".utf8)
+        let negative = JSONLText.completeLines(in: data, from: -7)
+        XCTAssertEqual(negative.lines, ["a"])
+        XCTAssertEqual(negative.consumed, 2)
+
+        let pastEnd = JSONLText.completeLines(in: data, from: 99)
+        XCTAssertEqual(pastEnd.lines, [])
+        XCTAssertEqual(pastEnd.consumed, 2, "clamped to the data's end")
+        XCTAssertNil(pastEnd.partial)
+    }
+
     // MARK: - v3 store format
 
     /// The store is JSONL — a version header line, then one entry per line (so flushing
