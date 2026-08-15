@@ -34,6 +34,11 @@ final class IOLayerTests: XCTestCase {
         return url
     }
 
+    /// A FRESH URL for a file in `dir`. `URL.resourceValues` caches stat results per URL
+    /// instance, so a test that re-stats the same instance after modifying the file reads
+    /// stale values — production always mints fresh URLs via findJSONL, and so must tests.
+    private func fresh(_ name: String) -> URL { dir.appendingPathComponent(name) }
+
     /// A valid JSONL assistant line carrying synthetic usage — the per-file unit the cache
     /// tests append/rewrite.
     private func assistantLine(id: String, req: String,
@@ -280,5 +285,222 @@ final class IOLayerTests: XCTestCase {
         let (records, _) = LogReader.parseFile(url)
         XCTAssertEqual(records.count, 1, "the good record survives a damaged neighbour")
         XCTAssertEqual(records.first?.usage.sum, 1500)
+    }
+
+    // MARK: - Incremental tail parsing (append-only files re-parse only their appended bytes)
+
+    /// The tail-only invariant, proven the strong way: after caching, the file's FIRST line is
+    /// overwritten in place with same-length garbage and a new record appended. The cache must
+    /// serve the original prefix record untouched — a full re-parse would see the garbage
+    /// (one malformed, no m1) — while parsing the appended record.
+    func testRecordCacheParsesOnlyTheAppendedTail() throws {
+        let line1 = assistantLine(id: "m1", req: "r1")
+        let url = try write("a.jsonl", [line1])
+        let cache = RecordCache()
+        XCTAssertEqual(cache.records(for: [fresh("a.jsonl")]).records.map(\.messageId), ["m1"])
+
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seek(toOffset: 0)
+        handle.write(Data(String(repeating: "X", count: line1.utf8.count).utf8))
+        handle.seekToEndOfFile()
+        handle.write(Data((assistantLine(id: "m2", req: "r2") + "\n").utf8))
+        try handle.close()
+
+        let out = cache.records(for: [fresh("a.jsonl")])
+        XCTAssertEqual(out.records.map(\.messageId), ["m1", "m2"],
+                       "the prefix came from the cache (tail-only read), the appended record was parsed")
+        XCTAssertEqual(out.malformed, 0, "the overwritten prefix was never re-read")
+    }
+
+    /// A trailing line with no newline yet (a record mid-write) is counted transiently —
+    /// matching the one-shot parse — but NEVER cached, so when its terminator arrives the
+    /// completed line parses whole. Caching the half would poison the resume offset: its
+    /// remainder would arrive as a garbage "line" while the half stayed malformed forever.
+    func testRecordCachePartialLineCompletesAcrossRefreshes() throws {
+        let full = assistantLine(id: "m2", req: "r2")
+        let firstHalf = String(full.prefix(full.count / 2))
+        let url = dir.appendingPathComponent("p.jsonl")
+        try (assistantLine(id: "m1", req: "r1") + "\n" + firstHalf)
+            .write(to: url, atomically: true, encoding: .utf8)
+
+        let cache = RecordCache()
+        let first = cache.records(for: [fresh("p.jsonl")])
+        XCTAssertEqual(first.records.map(\.messageId), ["m1"], "the half line is not a record yet")
+        XCTAssertEqual(first.malformed, 1, "…but it counts as malformed, matching the one-shot parse")
+
+        let again = cache.records(for: [fresh("p.jsonl")])
+        XCTAssertEqual(again.records.map(\.messageId), ["m1"])
+        XCTAssertEqual(again.malformed, 1, "transient count is stable across refreshes, never accumulating")
+
+        let handle = try FileHandle(forWritingTo: url)
+        handle.seekToEndOfFile()
+        handle.write(Data((String(full.dropFirst(firstHalf.count)) + "\n").utf8))
+        try handle.close()
+
+        let done = cache.records(for: [fresh("p.jsonl")])
+        XCTAssertEqual(done.records.map(\.messageId), ["m1", "m2"], "the completed line parses whole")
+        XCTAssertEqual(done.malformed, 0)
+    }
+
+    /// Shrinkage means the file was rewritten, not appended — the cached prefix is void and
+    /// the whole file re-parses (the append-only fast path must never merge across it).
+    func testRecordCacheShrunkFileReparsesFully() throws {
+        let url = try write("s.jsonl", [assistantLine(id: "m1", req: "r1"),
+                                        assistantLine(id: "m2", req: "r2")])
+        let cache = RecordCache()
+        XCTAssertEqual(cache.records(for: [fresh("s.jsonl")]).records.count, 2)
+
+        try write("s.jsonl", [assistantLine(id: "m3", req: "r3")])
+        XCTAssertEqual(cache.records(for: [fresh("s.jsonl")]).records.map(\.messageId), ["m3"],
+                       "a shrunk file is fully re-parsed, never tail-merged")
+    }
+
+    // MARK: - Codex incremental fold (cumulative counters resume from the cached state)
+
+    private func codexMeta(id: String) -> String {
+        #"{"timestamp":"2026-06-20T09:59:00Z","type":"session_meta","payload":{"id":"\#(id)"}}"#
+    }
+    private func codexTurn(model: String) -> String {
+        #"{"timestamp":"2026-06-20T09:59:30Z","type":"turn_context","payload":{"model":"\#(model)"}}"#
+    }
+    private func codexCount(ts: String, input: Int, cached: Int, output: Int,
+                            usedPct: Double? = nil) -> String {
+        let rl = usedPct.map {
+            #","rate_limits":{"primary":{"used_percent":\#($0),"window_minutes":300},"plan_type":"pro"}"#
+        } ?? ""
+        return #"{"timestamp":"\#(ts)","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":\#(input),"cached_input_tokens":\#(cached),"output_tokens":\#(output)}}\#(rl)}}"#
+    }
+
+    /// Codex counters are CUMULATIVE, so a tail parse is only correct if the fold resumes
+    /// from the cached baselines/session/seq. Appends cover both regimes — ordinary growth
+    /// and a compaction reset (counters shrink) — and the cache must match the one-shot
+    /// parse exactly: same deltas, continuing seq, same session id, and the appended
+    /// rate_limits snapshot surfacing.
+    func testCodexCacheResumesFoldAcrossAppends() throws {
+        let url = try write("rollout-2026-06-20T10-00-00-00000000-0000-0000-0000-000000000000.jsonl", [
+            codexMeta(id: "sess-1"),
+            codexTurn(model: "gpt-5.3-codex"),
+            codexCount(ts: "2026-06-20T10:00:00Z", input: 100, cached: 40, output: 10),
+        ])
+        let name = url.lastPathComponent
+        let cache = RecordCache()
+        XCTAssertEqual(cache.codexRecords(for: [fresh(name)]).records.count, 1)
+
+        let handle = try FileHandle(forWritingTo: url)
+        handle.seekToEndOfFile()
+        handle.write(Data(([
+            codexCount(ts: "2026-06-20T10:05:00Z", input: 250, cached: 90, output: 30, usedPct: 42),
+            codexCount(ts: "2026-06-20T10:10:00Z", input: 40, cached: 5, output: 5),  // compaction reset
+        ].joined(separator: "\n") + "\n").utf8))
+        try handle.close()
+
+        let out = cache.codexRecords(for: [fresh(name)])
+        let oneShot = CodexLogReader.parseFile(fresh(name))
+        XCTAssertEqual(out.records.map(\.usage.sum), oneShot.records.map(\.usage.sum),
+                       "deltas match the one-shot fold — baselines resumed, reset handled")
+        XCTAssertEqual(out.records.map(\.requestId), oneShot.records.map(\.requestId),
+                       "seq continues across the incremental boundary")
+        XCTAssertEqual(out.records.map(\.messageId), oneShot.records.map(\.messageId),
+                       "the session id established before the boundary survives it")
+        XCTAssertEqual(out.codexRateLimits?.primary?.usedPercent, 42,
+                       "the appended official snapshot surfaces")
+    }
+
+    /// `parsedBytes` persists: a FRESH instance (relaunch) serves the cached prefix and
+    /// parses only the tail — proven with the same corrupt-the-prefix trick as above.
+    func testPersistentCacheTailParsesAfterRelaunch() throws {
+        let store = dir.appendingPathComponent("record-cache.jsonl")
+        let line1 = assistantLine(id: "m1", req: "r1")
+        let url = try write("s.jsonl", [line1])
+        _ = RecordCache(storeURL: store).records(for: [fresh("s.jsonl")])
+
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seek(toOffset: 0)
+        handle.write(Data(String(repeating: "X", count: line1.utf8.count).utf8))
+        handle.seekToEndOfFile()
+        handle.write(Data((assistantLine(id: "m2", req: "r2") + "\n").utf8))
+        try handle.close()
+
+        let warm = RecordCache(storeURL: store)
+        let out = warm.records(for: [fresh("s.jsonl")])
+        XCTAssertEqual(out.records.map(\.messageId), ["m1", "m2"],
+                       "a fresh instance resumed from the persisted offset, not a re-parse")
+        XCTAssertEqual(out.malformed, 0)
+    }
+
+    /// A store entry with an impossible resume offset — the store is user-editable by design,
+    /// so a decoded entry is still input data — is dropped at hydration and its file simply
+    /// re-parses. Before the guard, a negative `parsedBytes` reached the byte scanner (an
+    /// out-of-bounds read); with only the scanner's clamp it would re-parse from 0 on top of
+    /// the cached records, duplicating them — so this pins the exact single-`m1` result.
+    func testPersistentCacheRejectsImpossiblePersistedOffset() throws {
+        let store = dir.appendingPathComponent("record-cache.jsonl")
+        let url = try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
+        _ = RecordCache(storeURL: store).records(for: [fresh("s.jsonl")])
+
+        let size = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as! Int
+        let text = try String(contentsOf: store, encoding: .utf8)
+        XCTAssertTrue(text.contains(#""parsedBytes":\#(size)"#), "test premise: the offset is in the store")
+        try text.replacingOccurrences(of: #""parsedBytes":\#(size)"#, with: #""parsedBytes":-5"#)
+            .write(to: store, atomically: true, encoding: .utf8)
+
+        let out = RecordCache(storeURL: store).records(for: [fresh("s.jsonl")])
+        XCTAssertEqual(out.records.map(\.messageId), ["m1"],
+                       "the poisoned entry was dropped and the file re-parsed — no crash, no duplicates")
+        XCTAssertEqual(out.malformed, 0)
+    }
+
+    /// The scanner's own defense: an out-of-range offset degrades to a bounded scan, never an
+    /// out-of-bounds read (persisted offsets are validated upstream, but bad input data must
+    /// not be able to crash the process from any path).
+    func testCompleteLinesClampsOutOfRangeOffsets() {
+        let data = Data("a\n".utf8)
+        let negative = JSONLText.completeLines(in: data, from: -7)
+        XCTAssertEqual(negative.lines, ["a"])
+        XCTAssertEqual(negative.consumed, 2)
+
+        let pastEnd = JSONLText.completeLines(in: data, from: 99)
+        XCTAssertEqual(pastEnd.lines, [])
+        XCTAssertEqual(pastEnd.consumed, 2, "clamped to the data's end")
+        XCTAssertNil(pastEnd.partial)
+    }
+
+    // MARK: - v3 store format
+
+    /// The store is JSONL — a version header line, then one entry per line (so flushing
+    /// encodes one entry at a time, never a boxed tree of all history) — and a successful
+    /// flush deletes the superseded v1/v2 blob stores.
+    func testPersistentStoreIsJSONLAndCleansUpOldVersions() throws {
+        let storeDir = dir.appendingPathComponent("cachedir")
+        try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
+        let store = storeDir.appendingPathComponent("record-cache-v3.jsonl")
+        let v1 = storeDir.appendingPathComponent("record-cache-v1.json")
+        let v2 = storeDir.appendingPathComponent("record-cache-v2.json")
+        try "old".write(to: v1, atomically: true, encoding: .utf8)
+        try "old".write(to: v2, atomically: true, encoding: .utf8)
+
+        let url = try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
+        _ = RecordCache(storeURL: store).records(for: [url])
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: v1.path), "superseded v1 store deleted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: v2.path), "superseded v2 store deleted")
+        let lines = try String(contentsOf: store, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.first, #"{"version":3}"#, "human-checkable version header")
+        XCTAssertEqual(lines.count, 2, "header + one entry: one JSON object per line")
+    }
+
+    // MARK: - JSONLText.completeLines (the byte-level cutter under all of the above)
+
+    /// Only newline-terminated lines are consumed; the trailing fragment comes back separately,
+    /// and resuming from `consumed` on the grown data yields the completed line whole.
+    func testCompleteLinesConsumesOnlyTerminatedLines() {
+        let cut = JSONLText.completeLines(in: Data("a\r\nb\nc".utf8), from: 0)
+        XCTAssertEqual(cut.lines, ["a", "b"], "CRLF and LF both terminate; the fragment is not a line")
+        XCTAssertEqual(cut.consumed, 5, #"consumed ends after "a\r\nb\n""#)
+        XCTAssertEqual(cut.partial, "c")
+
+        let grown = JSONLText.completeLines(in: Data("a\r\nb\nc-more\n".utf8), from: cut.consumed)
+        XCTAssertEqual(grown.lines, ["c-more"], "the completed fragment re-parses whole from `consumed`")
+        XCTAssertNil(grown.partial)
     }
 }

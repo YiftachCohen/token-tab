@@ -271,6 +271,48 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(alias.usd, 15, accuracy: 1e-12)
     }
 
+    func testPricingMemoizesRepeatedModelResolution() {
+        let pricing = Pricing()
+        let usage = u(10, 0, 0, 5)
+        let model = "us.anthropic.claude-opus-4-8-20251101-v1:0"
+
+        let first = pricing.cost(usage, model: model)
+        _ = pricing.cost(usage, model: model)
+        let third = pricing.cost(usage, model: model)
+
+        XCTAssertEqual(pricing.rateResolutionCount, 1)
+        XCTAssertTrue(third.priced)
+        XCTAssertEqual(third.usd, first.usd, accuracy: 1e-12)
+    }
+
+    /// The unpriced branch is what keeps an unknown model from re-running the regex
+    /// canonicalizer for every record, so it has to memoize the miss too.
+    func testPricingMemoizesUnpricedModelResolution() {
+        let pricing = Pricing()
+        let usage = u(10, 0, 0, 5)
+
+        _ = pricing.cost(usage, model: "gpt-5.5")
+        _ = pricing.cost(usage, model: "gpt-5.5")
+        let third = pricing.cost(usage, model: "gpt-5.5")
+
+        XCTAssertEqual(pricing.rateResolutionCount, 1)
+        XCTAssertFalse(third.priced)
+        XCTAssertEqual(third.usd, 0, accuracy: 1e-12)
+    }
+
+    func testPricingResolvesEachModelProviderPairOnce() {
+        let pricing = Pricing()
+        let usage = u(10, 0, 0, 5)
+
+        _ = pricing.cost(usage, model: "claude-opus-4-8")
+        _ = pricing.cost(usage, model: "claude-sonnet-4-5")
+        _ = pricing.cost(usage, model: "gpt-5.3-codex", provider: "codex")
+        _ = pricing.cost(usage, model: "claude-opus-4-8")
+        _ = pricing.cost(usage, model: "gpt-5.3-codex", provider: "codex")
+
+        XCTAssertEqual(pricing.rateResolutionCount, 3)
+    }
+
     func testPricingUnknownUnpriced() {
         let (usd, priced) = Pricing().cost(u(10, 0, 0, 5), model: "gpt-5.5")
         XCTAssertFalse(priced)

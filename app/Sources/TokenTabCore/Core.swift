@@ -497,6 +497,18 @@ public struct AggregateOptions: Sendable {
 /// Aggregate a stream of usage records into the snapshot the UI renders.
 /// Faithful port of core.mjs `aggregate()`, plus main/sub split, a rolling-1h burn
 /// figure, and a cost-injection hook.
+/// Dedup key for aggregate()/dailyHistory() — a pair, not the JS engine's concatenated
+/// `"${messageId}:${requestId}"` string, so pass 1 hashes the ids it already holds instead
+/// of allocating ~100k fresh key strings per refresh. Same collapses for every id shape
+/// either reader emits: pairs only merge where the concatenation would too (a divergence
+/// would need a messageId ending exactly where another's `:` sits — Claude ids are `msg_…`/
+/// `req_…` and the Codex reader's synthetic ids are uuid- and integer-suffixed, so no real
+/// pair of records can tell the two schemes apart).
+private enum DedupKey: Hashable {
+    case ids(String, String)     // (messageId, requestId), both non-empty
+    case synthetic(Int)          // id-less line: always counted, never collapsed
+}
+
 public func aggregate(_ records: [UsageRecord],
                       options: AggregateOptions = AggregateOptions(),
                       costModel: CostModel? = nil) -> Aggregate {
@@ -511,32 +523,32 @@ public func aggregate(_ records: [UsageRecord],
     let rollingCutoff = nowMs - fiveHours
     let hourCutoff = nowMs - oneHour
 
-    // Pass 1 — dedup, keep-last. Key = messageId:requestId when both exist; otherwise a
+    // Pass 1 — dedup, keep-last. Key = (messageId, requestId) when both exist; otherwise a
     // unique key (a line missing an id is always counted, never collapsed). Streaming
     // emits several usage lines per message sharing a key; output_tokens GROWS across
     // them, so the FINAL line wins.
-    var kept: [String: UsageRecord] = [:]
-    var order: [String] = []        // preserve first-seen order for determinism
+    var kept: [DedupKey: UsageRecord] = Dictionary(minimumCapacity: records.count)
+    var order: [DedupKey] = []        // preserve first-seen order for determinism
+    order.reserveCapacity(records.count)
     var uniqueCounter = 0
     var duplicatesDropped = 0
     var approximate = false
 
     for r in records {
         let hasIds = (r.messageId?.isEmpty == false) && (r.requestId?.isEmpty == false)
-        let key: String
+        let key: DedupKey
         if hasIds {
-            key = "\(r.messageId!):\(r.requestId!)"
+            key = .ids(r.messageId!, r.requestId!)
         } else {
-            key = "__nokey__\(uniqueCounter)"
+            key = .synthetic(uniqueCounter)
             uniqueCounter += 1
             approximate = true
         }
-        if kept[key] != nil {
+        if kept.updateValue(r, forKey: key) != nil {   // last-write-wins
             duplicatesDropped += 1
         } else {
             order.append(key)
         }
-        kept[key] = r // last-write-wins
     }
 
     // Pass 2 — aggregate the deduped records. Combined (all-provider) totals AND
@@ -767,20 +779,20 @@ public func dailyHistory(_ records: [UsageRecord],
     let nowMs = now.timeIntervalSince1970
 
     // Pass 1 — dedup, keep-last, first-seen order (mirrors aggregate()).
-    var kept: [String: UsageRecord] = [:]
-    var order: [String] = []
+    var kept: [DedupKey: UsageRecord] = Dictionary(minimumCapacity: records.count)
+    var order: [DedupKey] = []
+    order.reserveCapacity(records.count)
     var uniqueCounter = 0
     for r in records {
         let hasIds = (r.messageId?.isEmpty == false) && (r.requestId?.isEmpty == false)
-        let key: String
+        let key: DedupKey
         if hasIds {
-            key = "\(r.messageId!):\(r.requestId!)"
+            key = .ids(r.messageId!, r.requestId!)
         } else {
-            key = "__nokey__\(uniqueCounter)"
+            key = .synthetic(uniqueCounter)
             uniqueCounter += 1
         }
-        if kept[key] == nil { order.append(key) }
-        kept[key] = r
+        if kept.updateValue(r, forKey: key) == nil { order.append(key) }
     }
 
     // Pass 2 — sum into per-day buckets keyed by local day.
