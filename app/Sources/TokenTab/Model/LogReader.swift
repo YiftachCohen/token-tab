@@ -295,9 +295,32 @@ final class RecordCache: @unchecked Sendable {
         return dir.appendingPathComponent("record-cache-v\(version).jsonl")
     }
 
-    func records(for files: [URL]) -> (records: [UsageRecord], malformed: Int) {
+    /// How many records the cache is currently holding, for one provider or all of them.
+    /// Lets a refresh size its flat record array ONCE up front: built from empty, a ~115k-record
+    /// history grows through ~17 reallocations (~26 MB of copying), and every abandoned buffer
+    /// is a dirty page malloc then holds on its free list rather than returning to the OS.
+    func cachedRecordCount(provider: String? = nil) -> Int {
         hydrateIfNeeded()
+        var n = 0
+        for e in cache.values where provider == nil || e.provider == provider {
+            n += e.records.count
+        }
+        return n
+    }
+
+    func records(for files: [URL]) -> (records: [UsageRecord], malformed: Int) {
         var records: [UsageRecord] = []
+        records.reserveCapacity(cachedRecordCount(provider: "claude"))
+        let malformed = appendRecords(for: files, into: &records)
+        return (records, malformed)
+    }
+
+    /// Appending twin of `records(for:)`, so the Claude and Codex passes can fill ONE array
+    /// sized for both. Returning a fresh Claude array and then appending Codex to it triggers
+    /// a copy-on-write duplication of the whole history every refresh.
+    @discardableResult
+    func appendRecords(for files: [URL], into records: inout [UsageRecord]) -> Int {
+        hydrateIfNeeded()
         var malformed = 0
         var seen = Set<String>(minimumCapacity: files.count)
         for url in files {
@@ -359,7 +382,7 @@ final class RecordCache: @unchecked Sendable {
         // (they aren't in this walk's `seen` set; codexRecords prunes its own vanished files).
         pruneVanished(seen: seen, provider: "claude")
         persistIfNeeded()
-        return (records, malformed)
+        return malformed
     }
 
     /// Count a trailing not-yet-terminated line for THIS refresh only (never cached).
@@ -397,8 +420,16 @@ final class RecordCache: @unchecked Sendable {
     /// is the globally latest snapshot by asOf. Shares the same on-disk store as the Claude
     /// path; the per-entry `provider` keeps the two apart.
     func codexRecords(for files: [URL]) -> (records: [UsageRecord], malformed: Int, codexRateLimits: CodexRateLimitsSnapshot?) {
-        hydrateIfNeeded()
         var records: [UsageRecord] = []
+        records.reserveCapacity(cachedRecordCount(provider: "codex"))
+        let r = appendCodexRecords(for: files, into: &records)
+        return (records, r.malformed, r.codexRateLimits)
+    }
+
+    /// Appending twin of `codexRecords(for:)` — see `appendRecords(for:into:)`.
+    func appendCodexRecords(for files: [URL], into records: inout [UsageRecord])
+        -> (malformed: Int, codexRateLimits: CodexRateLimitsSnapshot?) {
+        hydrateIfNeeded()
         var malformed = 0
         var latest: CodexRateLimitsSnapshot? = nil
         var seen = Set<String>(minimumCapacity: files.count)
@@ -480,7 +511,7 @@ final class RecordCache: @unchecked Sendable {
         }
         pruneVanished(seen: seen, provider: "codex")
         persistIfNeeded()
-        return (records, malformed, latest)
+        return (malformed, latest)
     }
 
     /// Load the persisted cache once, before the first parse. A missing/corrupt/old-version
