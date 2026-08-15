@@ -468,6 +468,40 @@ final class CoreTests: XCTestCase {
                        "history covers everything but the January record")
     }
 
+    /// The dedup fingerprint is PERSISTED in the record cache, so it must be identical in every
+    /// process, forever — not merely consistent within one run. Swift's own `Hasher` is seeded
+    /// per process and would satisfy every other test here while silently breaking cross-launch
+    /// dedup: cached records would stop collapsing against a resumed session's replayed copies
+    /// and totals would inflate. This pins the exact value, computed independently, so swapping
+    /// the algorithm has to be a deliberate act (with a cache version bump).
+    func testDedupKeyIsStableAcrossProcesses() {
+        XCTAssertEqual(UsageRecord.dedupKey(messageId: "m1", requestId: "r1"),
+                       11_541_495_015_102_151_977,
+                       "FNV-1a + SplitMix64 over messageId, 0xFF, requestId")
+        XCTAssertEqual(rec(messageId: "m1", requestId: "r1").dedupKey,
+                       UsageRecord.dedupKey(messageId: "m1", requestId: "r1"),
+                       "the initializer stores exactly this fingerprint")
+    }
+
+    /// The two ids are fingerprinted with a separator, so the pair stays a PAIR: concatenating
+    /// them would make ("ab","c") and ("a","bc") the same record and collapse one away.
+    func testDedupKeySeparatesTheTwoIds() {
+        XCTAssertNotEqual(UsageRecord.dedupKey(messageId: "ab", requestId: "c"),
+                          UsageRecord.dedupKey(messageId: "a", requestId: "bc"))
+        XCTAssertEqual(UsageRecord.dedupKey(messageId: "ab", requestId: "c"), 743_874_810_762_885_073)
+        XCTAssertEqual(UsageRecord.dedupKey(messageId: "a", requestId: "bc"), 6_110_001_816_571_610_165)
+    }
+
+    /// A record missing either id has no fingerprint, which is what makes it uncollapsible —
+    /// the `approximate` path. An empty string counts as missing, exactly as the old pair key did.
+    func testDedupKeyIsNilWithoutBothIds() {
+        XCTAssertNil(UsageRecord.dedupKey(messageId: nil, requestId: "r1"))
+        XCTAssertNil(UsageRecord.dedupKey(messageId: "m1", requestId: nil))
+        XCTAssertNil(UsageRecord.dedupKey(messageId: "", requestId: "r1"))
+        XCTAssertNil(UsageRecord.dedupKey(messageId: "m1", requestId: ""))
+        XCTAssertNotNil(UsageRecord.dedupKey(messageId: "m1", requestId: "r1"))
+    }
+
     func testDailyHistorySkipsUntimestamped() {
         let now = date("2026-06-20T12:00:00Z")
         let records = [

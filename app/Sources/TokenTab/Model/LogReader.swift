@@ -213,10 +213,16 @@ final class RecordCache: @unchecked Sendable {
 
     /// Bump when the parse output shape changes, so an old build's cache is ignored, not trusted.
     /// v3: JSONL store (header + one entry per line), `parsedBytes`, Codex fold state.
-    private static let version = 3
-    /// Superseded store files, deleted after a successful v3 flush (~50 MB of dead cache
+    /// v4: records carry a `dedupKey` fingerprint instead of `messageId`/`requestId`. A v3
+    ///     store decoded as v4 would give every record a nil key — nothing would ever collapse
+    ///     and totals would roughly double — so the version gate discarding it is load-bearing,
+    ///     not housekeeping. Costs one cold re-parse on the upgrade launch.
+    private static let version = 4
+    /// Superseded store files, deleted after a successful flush (~50 MB of dead cache
     /// otherwise sits in Caches forever). Names only — never anything we didn't write.
-    private static let supersededStores = ["record-cache-v1.json", "record-cache-v2.json"]
+    private static let supersededStores = [
+        "record-cache-v1.json", "record-cache-v2.json", "record-cache-v3.jsonl",
+    ]
     private let storeURL: URL?
     private var hydrated = false
     private var dirty = false

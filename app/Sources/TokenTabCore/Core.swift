@@ -16,11 +16,13 @@ import Foundation
 
 /// One assistant usage record, stripped to the fields we count. Never carries content.
 /// `Codable` so the I/O shell's on-disk record cache can persist parsed records across
-/// launches — the only fields here are opaque ids, the model, token counts, a timestamp
-/// and the sidechain flag, so the cache, like the in-memory model, holds no prompt/code.
+/// launches — the only fields here are a dedup fingerprint, the model, token counts, a
+/// timestamp and the sidechain flag, so the cache, like the in-memory model, holds no
+/// prompt/code. It no longer even holds the message and request ids (see `dedupKey`).
 public struct UsageRecord: Sendable, Codable {
-    public var messageId: String?
-    public var requestId: String?
+    /// Fingerprint of `(messageId, requestId)` — see `UsageRecord.dedupKey(messageId:requestId:)`.
+    /// nil for a line missing either id, which is never collapsed.
+    public var dedupKey: UInt64?
     public var model: String
     public var usage: TokenUsage
     public var timestamp: Date?
@@ -31,13 +33,52 @@ public struct UsageRecord: Sendable, Codable {
 
     public init(messageId: String?, requestId: String?, model: String,
                 usage: TokenUsage, timestamp: Date?, isSidechain: Bool, provider: String? = nil) {
-        self.messageId = messageId
-        self.requestId = requestId
+        self.dedupKey = UsageRecord.dedupKey(messageId: messageId, requestId: requestId)
         self.model = model
         self.usage = usage
         self.timestamp = timestamp
         self.isSidechain = isSidechain
         self.provider = provider
+    }
+
+    /// Reduce a record's two ids to the 64-bit fingerprint that IS its dedup identity — the
+    /// only thing we keep of either id. Returns nil when either is missing or empty, which is
+    /// how a line with no ids stays uncollapsible.
+    ///
+    /// The ids are never displayed, never persisted, and never compared to anything but each
+    /// other; keeping them cost two heap allocations per record (~226k `StringStorage`, ~17 MB
+    /// on a real history) purely so pass 1 could compare a pair of strings. A fingerprint costs
+    /// eight inline bytes and hashes in one word.
+    ///
+    /// Deliberately NOT Swift's `Hasher`, which is seeded per process: this key is written to
+    /// the record cache, so a fingerprint that changed between launches would stop collapsing a
+    /// resumed session's replayed records against their cached originals and silently inflate
+    /// every total. FNV-1a is deterministic; the SplitMix64 finalizer follows because FNV-1a
+    /// alone avalanches poorly in the high bits, and the collision estimate below assumes a
+    /// uniform 64-bit draw.
+    ///
+    /// The cost of this trade, stated plainly: two DIFFERENT id pairs that fingerprint alike
+    /// would merge, dropping one record's tokens. Across ~63k distinct pairs (a 1.1 GB log
+    /// history) that is a ~1-in-10-billion chance, and it degrades one record rather than
+    /// corrupting the file.
+    public static func dedupKey(messageId: String?, requestId: String?) -> UInt64? {
+        guard let messageId, !messageId.isEmpty,
+              let requestId, !requestId.isEmpty else { return nil }
+        let prime: UInt64 = 0x100000001b3
+        var h: UInt64 = 0xcbf29ce484222325          // FNV-1a offset basis
+        func absorb(_ byte: UInt8) {
+            h ^= UInt64(byte)
+            h = h &* prime
+        }
+        for byte in messageId.utf8 { absorb(byte) }
+        absorb(0xFF)                                 // separator, so ("ab","c") ≠ ("a","bc").
+                                                     // 0xFF cannot occur in UTF-8, so it can
+                                                     // never collide with a byte of an id.
+        for byte in requestId.utf8 { absorb(byte) }
+        h ^= h >> 30; h = h &* 0xbf58476d1ce4e5b9    // SplitMix64 finalizer
+        h ^= h >> 27; h = h &* 0x94d049bb133111eb
+        h ^= h >> 31
+        return h
     }
 }
 
@@ -497,21 +538,6 @@ public struct AggregateOptions: Sendable {
 /// Aggregate a stream of usage records into the snapshot the UI renders.
 /// Faithful port of core.mjs `aggregate()`, plus main/sub split, a rolling-1h burn
 /// figure, and a cost-injection hook.
-/// Dedup key for aggregate()/dailyHistory() — a pair, not the JS engine's concatenated
-/// `"${messageId}:${requestId}"` string, so pass 1 hashes the ids it already holds instead
-/// of allocating ~100k fresh key strings per refresh. Same collapses for every id shape
-/// either reader emits: pairs only merge where the concatenation would too (a divergence
-/// would need a messageId ending exactly where another's `:` sits — Claude ids are `msg_…`/
-/// `req_…` and the Codex reader's synthetic ids are uuid- and integer-suffixed, so no real
-/// pair of records can tell the two schemes apart).
-///
-/// Only id-BEARING records are ever keyed: an id-less line is never collapsed, so it needs
-/// no key at all (it just takes its own slot in `Deduped.order`).
-private struct DedupKey: Hashable {
-    let messageId: String
-    let requestId: String
-}
-
 /// The result of the shared dedup pass: `order` holds, in FIRST-SEEN order, the index of the
 /// record that WINS each key. Indices into the caller's array rather than copies of the
 /// records themselves — the dedup map used to be `[DedupKey: UsageRecord]` with a
@@ -531,21 +557,19 @@ struct Deduped {
 /// both apply. Streaming emits several usage lines per message sharing a key; output_tokens
 /// GROWS across them, so the FINAL line wins while the slot keeps its first-seen position.
 private func dedupe(_ records: [UsageRecord]) -> Deduped {
-    var slot: [DedupKey: Int] = Dictionary(minimumCapacity: records.count)
+    var slot: [UInt64: Int] = Dictionary(minimumCapacity: records.count)
     var order: [Int] = []
     order.reserveCapacity(records.count)
     var duplicatesDropped = 0
     var approximate = false
 
     for (i, r) in records.enumerated() {
-        guard let messageId = r.messageId, !messageId.isEmpty,
-              let requestId = r.requestId, !requestId.isEmpty else {
+        guard let key = r.dedupKey else {
             // A line missing an id is always counted, never collapsed.
             approximate = true
             order.append(i)
             continue
         }
-        let key = DedupKey(messageId: messageId, requestId: requestId)
         if let seen = slot[key] {
             order[seen] = i               // last-write-wins, in the first-seen position
             duplicatesDropped += 1
