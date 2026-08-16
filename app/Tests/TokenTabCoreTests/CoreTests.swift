@@ -407,6 +407,101 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(h.last?.costByModel["claude-opus-4-8"] ?? -1, expected, accuracy: 1e-12)
     }
 
+    /// `aggregateWithHistory` exists only to share ONE dedup pass between the two functions the
+    /// app always calls together (two ~38 MB transient maps per refresh became one ~11 MB map).
+    /// It is a memory optimisation, so the invariant that matters is that it changes NOTHING:
+    /// every field must equal what calling the two separately returns. The fixture deliberately
+    /// exercises the paths the shared pass could get wrong — a streaming duplicate (keep-last),
+    /// an id-less record (never collapsed, sets `approximate`), records outside the history
+    /// window, and a second provider.
+    func testAggregateWithHistoryMatchesSeparateCalls() {
+        let now = date("2026-06-20T12:00:00Z")
+        var codex = rec(messageId: "c1", requestId: "cr1", model: "gpt-5.5",
+                        usage: u(7, 0, 3, 2), timestamp: "2026-06-20T09:00:00Z")
+        codex.provider = "codex"
+        let records = [
+            rec(messageId: "t", requestId: "tr", usage: u(5, 1151, 34462, 2),   timestamp: "2026-06-20T12:00:00Z"),
+            rec(messageId: "t", requestId: "tr", usage: u(5, 1151, 34462, 227), timestamp: "2026-06-20T12:00:00Z"),
+            rec(messageId: "old", requestId: "oldr", usage: u(90, 0, 0, 9), timestamp: "2026-01-02T12:00:00Z"),
+            rec(messageId: "n", requestId: nil, usage: u(4, 0, 0, 1), timestamp: "2026-06-19T12:00:00Z"),
+            rec(messageId: "s", requestId: "sr", usage: u(1, 2, 3, 4),
+                timestamp: "2026-06-20T11:00:00Z", isSidechain: true),
+            codex,
+        ]
+        let options = AggregateOptions(now: now, cap: 500)
+        let separateAgg = aggregate(records, options: options, costModel: Pricing())
+        let separateHistory = dailyHistory(records, days: 60, now: now, costModel: Pricing())
+        let combined = aggregateWithHistory(records, options: options,
+                                            historyDays: 60, costModel: Pricing())
+
+        XCTAssertEqual(combined.aggregate.total, separateAgg.total)
+        XCTAssertEqual(combined.aggregate.counted, separateAgg.counted)
+        XCTAssertEqual(combined.aggregate.duplicatesDropped, separateAgg.duplicatesDropped)
+        XCTAssertEqual(combined.aggregate.approximate, separateAgg.approximate)
+        XCTAssertEqual(combined.aggregate.today, separateAgg.today)
+        XCTAssertEqual(combined.aggregate.thisWeek, separateAgg.thisWeek)
+        XCTAssertEqual(combined.aggregate.rolling5h, separateAgg.rolling5h)
+        XCTAssertEqual(combined.aggregate.lastHourTokens, separateAgg.lastHourTokens)
+        XCTAssertEqual(combined.aggregate.byModel, separateAgg.byModel)
+        XCTAssertEqual(combined.aggregate.bySurface, separateAgg.bySurface)
+        XCTAssertEqual(combined.aggregate.split.subTokens, separateAgg.split.subTokens)
+        XCTAssertEqual(combined.aggregate.split.mainTokens, separateAgg.split.mainTokens)
+        XCTAssertEqual(combined.aggregate.window.tokens, separateAgg.window.tokens)
+        XCTAssertEqual(combined.aggregate.window.calibratedCap, separateAgg.window.calibratedCap)
+        XCTAssertEqual(combined.aggregate.cost?.total ?? -1, separateAgg.cost?.total ?? -2, accuracy: 1e-12)
+        XCTAssertEqual(combined.aggregate.providers["codex"]?.total, separateAgg.providers["codex"]?.total)
+        XCTAssertEqual(combined.aggregate.providers["claude"]?.total, separateAgg.providers["claude"]?.total)
+
+        XCTAssertEqual(combined.history.count, separateHistory.count)
+        for (a, b) in zip(combined.history, separateHistory) {
+            XCTAssertEqual(a.date, b.date)
+            XCTAssertEqual(a.tokens, b.tokens)
+            XCTAssertEqual(a.cost, b.cost, accuracy: 1e-12)
+            XCTAssertEqual(a.tokensByModel, b.tokensByModel)
+        }
+        // Guard the fixture itself: a dedup rule that silently stopped collapsing (or stopped
+        // counting the id-less line) would still pass an all-equal comparison.
+        XCTAssertEqual(combined.aggregate.duplicatesDropped, 1, "the streaming pair collapsed")
+        XCTAssertTrue(combined.aggregate.approximate, "the id-less record is counted, not collapsed")
+        // 35845 (streaming, keep-last) + 5 (id-less) + 10 (sidechain) + 12 (codex).
+        XCTAssertEqual(combined.history.reduce(0) { $0 + $1.tokens }, 35_872,
+                       "history covers everything but the January record")
+    }
+
+    /// The dedup fingerprint is PERSISTED in the record cache, so it must be identical in every
+    /// process, forever — not merely consistent within one run. Swift's own `Hasher` is seeded
+    /// per process and would satisfy every other test here while silently breaking cross-launch
+    /// dedup: cached records would stop collapsing against a resumed session's replayed copies
+    /// and totals would inflate. This pins the exact value, computed independently, so swapping
+    /// the algorithm has to be a deliberate act (with a cache version bump).
+    func testDedupKeyIsStableAcrossProcesses() {
+        XCTAssertEqual(UsageRecord.dedupKey(messageId: "m1", requestId: "r1"),
+                       11_541_495_015_102_151_977,
+                       "FNV-1a + SplitMix64 over messageId, 0xFF, requestId")
+        XCTAssertEqual(rec(messageId: "m1", requestId: "r1").dedupKey,
+                       UsageRecord.dedupKey(messageId: "m1", requestId: "r1"),
+                       "the initializer stores exactly this fingerprint")
+    }
+
+    /// The two ids are fingerprinted with a separator, so the pair stays a PAIR: concatenating
+    /// them would make ("ab","c") and ("a","bc") the same record and collapse one away.
+    func testDedupKeySeparatesTheTwoIds() {
+        XCTAssertNotEqual(UsageRecord.dedupKey(messageId: "ab", requestId: "c"),
+                          UsageRecord.dedupKey(messageId: "a", requestId: "bc"))
+        XCTAssertEqual(UsageRecord.dedupKey(messageId: "ab", requestId: "c"), 743_874_810_762_885_073)
+        XCTAssertEqual(UsageRecord.dedupKey(messageId: "a", requestId: "bc"), 6_110_001_816_571_610_165)
+    }
+
+    /// A record missing either id has no fingerprint, which is what makes it uncollapsible —
+    /// the `approximate` path. An empty string counts as missing, exactly as the old pair key did.
+    func testDedupKeyIsNilWithoutBothIds() {
+        XCTAssertNil(UsageRecord.dedupKey(messageId: nil, requestId: "r1"))
+        XCTAssertNil(UsageRecord.dedupKey(messageId: "m1", requestId: nil))
+        XCTAssertNil(UsageRecord.dedupKey(messageId: "", requestId: "r1"))
+        XCTAssertNil(UsageRecord.dedupKey(messageId: "m1", requestId: ""))
+        XCTAssertNotNil(UsageRecord.dedupKey(messageId: "m1", requestId: "r1"))
+    }
+
     func testDailyHistorySkipsUntimestamped() {
         let now = date("2026-06-20T12:00:00Z")
         let records = [

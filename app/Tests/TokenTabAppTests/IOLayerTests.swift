@@ -39,6 +39,17 @@ final class IOLayerTests: XCTestCase {
     /// stale values — production always mints fresh URLs via findJSONL, and so must tests.
     private func fresh(_ name: String) -> URL { dir.appendingPathComponent(name) }
 
+    /// The dedup fingerprint of the record `assistantLine(id: m, req: "r<suffix>")` produces.
+    /// `UsageRecord` keeps only a 64-bit fingerprint of (messageId, requestId), never the ids
+    /// themselves (see `UsageRecord.dedupKey`), so these tests assert record identity and order
+    /// by fingerprint. Every fixture here pairs `mN` with `rN`, so `mid("m1")` names one record.
+    private func mid(_ messageId: String) -> UInt64? {
+        UsageRecord.dedupKey(messageId: messageId, requestId: "r" + messageId.dropFirst())
+    }
+
+    /// `mid` for a whole expected sequence: `mids("m1", "m2")` is "these two records, in order".
+    private func mids(_ messageIds: String...) -> [UInt64?] { messageIds.map(mid) }
+
     /// A valid JSONL assistant line carrying synthetic usage — the per-file unit the cache
     /// tests append/rewrite.
     private func assistantLine(id: String, req: String,
@@ -69,8 +80,9 @@ final class IOLayerTests: XCTestCase {
         XCTAssertNotNil(records[0].timestamp, "fractional-seconds timestamp parses")
         XCTAssertNotNil(records[1].timestamp, "non-fractional timestamp parses")
         XCTAssertEqual(records[0].usage.sum, 62, "10+20+30+2")
-        XCTAssertEqual(records[0].requestId, "r1")
-        XCTAssertEqual(records[1].requestId, "r2")
+        // Both ids reach the fingerprint: `mid` rebuilds it from the pair the lines carry, so a
+        // reader that dropped either id (or read them from the wrong nesting level) fails here.
+        XCTAssertEqual(records.map(\.dedupKey), mids("m1", "m2"))
     }
 
     /// An assistant line with no `usage` object is not a usage record (it is skipped, not
@@ -85,7 +97,7 @@ final class IOLayerTests: XCTestCase {
         let (records, malformed) = LogReader.parseFile(url)
         XCTAssertEqual(records.count, 1, "the usage-less assistant line is skipped, the real one counts")
         XCTAssertEqual(malformed, 0, "blank/whitespace lines are ignored, not malformed")
-        XCTAssertEqual(records[0].messageId, "m2")
+        XCTAssertEqual(records[0].dedupKey, mid("m2"))
     }
 
     /// A vanished/unreadable file is empty, not a crash (tolerated mid-walk).
@@ -138,7 +150,7 @@ final class IOLayerTests: XCTestCase {
         XCTAssertEqual(cached.records.count, uncached.records.count)
         XCTAssertEqual(cached.malformed, uncached.malformed)
         XCTAssertEqual(cached.malformed, 1)
-        XCTAssertEqual(cached.records.map(\.messageId), uncached.records.map(\.messageId),
+        XCTAssertEqual(cached.records.map(\.dedupKey), uncached.records.map(\.dedupKey),
                        "cache returns records in the same (files) order as the uncached path")
     }
 
@@ -180,7 +192,7 @@ final class IOLayerTests: XCTestCase {
 
         let second = cache.records(for: LogReader.findJSONL(in: dir))
         XCTAssertEqual(second.records.count, 1, "the deleted file's records are gone")
-        XCTAssertEqual(second.records.first?.messageId, "m1")
+        XCTAssertEqual(second.records.first?.dedupKey, mid("m1"))
     }
 
     // MARK: - RecordCache persistence (cross-launch)
@@ -199,7 +211,7 @@ final class IOLayerTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: pinned], ofItemAtPath: url.path)
 
         let cold = RecordCache(storeURL: store)
-        XCTAssertEqual(cold.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1"])
+        XCTAssertEqual(cold.records(for: LogReader.findJSONL(in: dir)).records.map(\.dedupKey), mids("m1"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.path), "the cold run flushed the cache to disk")
 
         // Rewrite with a DIFFERENT record of identical byte length (same-length ids) and restore
@@ -208,7 +220,7 @@ final class IOLayerTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: pinned], ofItemAtPath: url.path)
 
         let warm = RecordCache(storeURL: store)   // fresh instance → must hydrate from the store file
-        XCTAssertEqual(warm.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1"],
+        XCTAssertEqual(warm.records(for: LogReader.findJSONL(in: dir)).records.map(\.dedupKey), mids("m1"),
                        "a new instance reused the persisted record for an unchanged fingerprint, not the file's new bytes")
     }
 
@@ -222,7 +234,7 @@ final class IOLayerTests: XCTestCase {
         try write("s.jsonl", [assistantLine(id: "m1", req: "r1"), assistantLine(id: "m2", req: "r2")])
 
         let warm = RecordCache(storeURL: store)
-        XCTAssertEqual(warm.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1", "m2"],
+        XCTAssertEqual(warm.records(for: LogReader.findJSONL(in: dir)).records.map(\.dedupKey), mids("m1", "m2"),
                        "a changed fingerprint forces a re-parse, never a stale reuse")
     }
 
@@ -234,7 +246,7 @@ final class IOLayerTests: XCTestCase {
         try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
 
         let cache = RecordCache(storeURL: store)
-        XCTAssertEqual(cache.records(for: LogReader.findJSONL(in: dir)).records.map(\.messageId), ["m1"],
+        XCTAssertEqual(cache.records(for: LogReader.findJSONL(in: dir)).records.map(\.dedupKey), mids("m1"),
                        "a corrupt store is discarded and the logs are parsed fresh")
     }
 
@@ -297,7 +309,7 @@ final class IOLayerTests: XCTestCase {
         let line1 = assistantLine(id: "m1", req: "r1")
         let url = try write("a.jsonl", [line1])
         let cache = RecordCache()
-        XCTAssertEqual(cache.records(for: [fresh("a.jsonl")]).records.map(\.messageId), ["m1"])
+        XCTAssertEqual(cache.records(for: [fresh("a.jsonl")]).records.map(\.dedupKey), mids("m1"))
 
         let handle = try FileHandle(forWritingTo: url)
         try handle.seek(toOffset: 0)
@@ -307,7 +319,7 @@ final class IOLayerTests: XCTestCase {
         try handle.close()
 
         let out = cache.records(for: [fresh("a.jsonl")])
-        XCTAssertEqual(out.records.map(\.messageId), ["m1", "m2"],
+        XCTAssertEqual(out.records.map(\.dedupKey), mids("m1", "m2"),
                        "the prefix came from the cache (tail-only read), the appended record was parsed")
         XCTAssertEqual(out.malformed, 0, "the overwritten prefix was never re-read")
     }
@@ -325,11 +337,11 @@ final class IOLayerTests: XCTestCase {
 
         let cache = RecordCache()
         let first = cache.records(for: [fresh("p.jsonl")])
-        XCTAssertEqual(first.records.map(\.messageId), ["m1"], "the half line is not a record yet")
+        XCTAssertEqual(first.records.map(\.dedupKey), mids("m1"), "the half line is not a record yet")
         XCTAssertEqual(first.malformed, 1, "…but it counts as malformed, matching the one-shot parse")
 
         let again = cache.records(for: [fresh("p.jsonl")])
-        XCTAssertEqual(again.records.map(\.messageId), ["m1"])
+        XCTAssertEqual(again.records.map(\.dedupKey), mids("m1"))
         XCTAssertEqual(again.malformed, 1, "transient count is stable across refreshes, never accumulating")
 
         let handle = try FileHandle(forWritingTo: url)
@@ -338,7 +350,7 @@ final class IOLayerTests: XCTestCase {
         try handle.close()
 
         let done = cache.records(for: [fresh("p.jsonl")])
-        XCTAssertEqual(done.records.map(\.messageId), ["m1", "m2"], "the completed line parses whole")
+        XCTAssertEqual(done.records.map(\.dedupKey), mids("m1", "m2"), "the completed line parses whole")
         XCTAssertEqual(done.malformed, 0)
     }
 
@@ -351,7 +363,7 @@ final class IOLayerTests: XCTestCase {
         XCTAssertEqual(cache.records(for: [fresh("s.jsonl")]).records.count, 2)
 
         try write("s.jsonl", [assistantLine(id: "m3", req: "r3")])
-        XCTAssertEqual(cache.records(for: [fresh("s.jsonl")]).records.map(\.messageId), ["m3"],
+        XCTAssertEqual(cache.records(for: [fresh("s.jsonl")]).records.map(\.dedupKey), mids("m3"),
                        "a shrunk file is fully re-parsed, never tail-merged")
     }
 
@@ -398,10 +410,11 @@ final class IOLayerTests: XCTestCase {
         let oneShot = CodexLogReader.parseFile(fresh(name))
         XCTAssertEqual(out.records.map(\.usage.sum), oneShot.records.map(\.usage.sum),
                        "deltas match the one-shot fold — baselines resumed, reset handled")
-        XCTAssertEqual(out.records.map(\.requestId), oneShot.records.map(\.requestId),
-                       "seq continues across the incremental boundary")
-        XCTAssertEqual(out.records.map(\.messageId), oneShot.records.map(\.messageId),
-                       "the session id established before the boundary survives it")
+        // The fingerprint mixes BOTH synthetic ids, so this one comparison covers what used to
+        // be two: that `seq` continues across the incremental boundary (it drives requestId) and
+        // that the session id established before the boundary survives it (it drives messageId).
+        XCTAssertEqual(out.records.map(\.dedupKey), oneShot.records.map(\.dedupKey),
+                       "seq and session id both continue across the incremental boundary")
         XCTAssertEqual(out.codexRateLimits?.primary?.usedPercent, 42,
                        "the appended official snapshot surfaces")
     }
@@ -423,7 +436,7 @@ final class IOLayerTests: XCTestCase {
 
         let warm = RecordCache(storeURL: store)
         let out = warm.records(for: [fresh("s.jsonl")])
-        XCTAssertEqual(out.records.map(\.messageId), ["m1", "m2"],
+        XCTAssertEqual(out.records.map(\.dedupKey), mids("m1", "m2"),
                        "a fresh instance resumed from the persisted offset, not a re-parse")
         XCTAssertEqual(out.malformed, 0)
     }
@@ -445,7 +458,7 @@ final class IOLayerTests: XCTestCase {
             .write(to: store, atomically: true, encoding: .utf8)
 
         let out = RecordCache(storeURL: store).records(for: [fresh("s.jsonl")])
-        XCTAssertEqual(out.records.map(\.messageId), ["m1"],
+        XCTAssertEqual(out.records.map(\.dedupKey), mids("m1"),
                        "the poisoned entry was dropped and the file re-parsed — no crash, no duplicates")
         XCTAssertEqual(out.malformed, 0)
     }
@@ -465,28 +478,57 @@ final class IOLayerTests: XCTestCase {
         XCTAssertNil(pastEnd.partial)
     }
 
-    // MARK: - v3 store format
+    // MARK: - v4 store format
 
     /// The store is JSONL — a version header line, then one entry per line (so flushing
     /// encodes one entry at a time, never a boxed tree of all history) — and a successful
-    /// flush deletes the superseded v1/v2 blob stores.
+    /// flush deletes every superseded store (the v1/v2 blobs and the v3 JSONL).
     func testPersistentStoreIsJSONLAndCleansUpOldVersions() throws {
         let storeDir = dir.appendingPathComponent("cachedir")
         try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
-        let store = storeDir.appendingPathComponent("record-cache-v3.jsonl")
-        let v1 = storeDir.appendingPathComponent("record-cache-v1.json")
-        let v2 = storeDir.appendingPathComponent("record-cache-v2.json")
-        try "old".write(to: v1, atomically: true, encoding: .utf8)
-        try "old".write(to: v2, atomically: true, encoding: .utf8)
+        let store = storeDir.appendingPathComponent("record-cache-v4.jsonl")
+        let superseded = ["record-cache-v1.json", "record-cache-v2.json", "record-cache-v3.jsonl"]
+            .map { storeDir.appendingPathComponent($0) }
+        for old in superseded { try "old".write(to: old, atomically: true, encoding: .utf8) }
 
         let url = try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
         _ = RecordCache(storeURL: store).records(for: [url])
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: v1.path), "superseded v1 store deleted")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: v2.path), "superseded v2 store deleted")
+        for old in superseded {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: old.path),
+                           "superseded \(old.lastPathComponent) deleted")
+        }
         let lines = try String(contentsOf: store, encoding: .utf8).split(separator: "\n")
-        XCTAssertEqual(lines.first, #"{"version":3}"#, "human-checkable version header")
+        XCTAssertEqual(lines.first, #"{"version":4}"#, "human-checkable version header")
         XCTAssertEqual(lines.count, 2, "header + one entry: one JSON object per line")
+        // The ids never reach disk: the store carries only their fingerprint.
+        let body = String(lines[1])
+        XCTAssertTrue(body.contains("dedupKey"), "the entry persists the dedup fingerprint")
+        XCTAssertFalse(body.contains("\"m1\""), "the messageId itself is not written")
+        XCTAssertFalse(body.contains("\"r1\""), "the requestId itself is not written")
+    }
+
+    /// A v3 store (records keyed by `messageId`/`requestId`) must be DISCARDED, not decoded as
+    /// v4. Decoded as v4 every record would come back with a nil `dedupKey`, nothing would ever
+    /// collapse, and a resumed session's replayed records would double every total — so this
+    /// gate is load-bearing, not housekeeping. The file simply re-parses instead.
+    func testStoreFromPreviousVersionIsDiscardedNotMisread() throws {
+        let storeDir = dir.appendingPathComponent("cachedir")
+        try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
+        let store = storeDir.appendingPathComponent("record-cache-v4.jsonl")
+        let url = try write("s.jsonl", [assistantLine(id: "m1", req: "r1")])
+
+        // A v3-shaped store naming the same file, claiming a bogus record count for it.
+        let stale = #"{"version":3}"# + "\n" + #"{"path":"\#(url.path)","mtime":0,"size":999999,"#
+            + #""records":[{"messageId":"m1","requestId":"r1","model":"claude-opus-4-8","#
+            + #""usage":{"input":1,"cacheCreate":0,"cacheRead":0,"output":1},"isSidechain":false}],"#
+            + #""malformed":0,"provider":"claude","parsedBytes":0}"# + "\n"
+        try stale.write(to: store, atomically: true, encoding: .utf8)
+
+        let out = RecordCache(storeURL: store).records(for: [url])
+        XCTAssertEqual(out.records.map(\.dedupKey), mids("m1"),
+                       "the v3 store is ignored and the file re-parses")
+        XCTAssertEqual(out.records.first?.usage.sum, 15, "10+5 from the real line, not the stale entry")
     }
 
     // MARK: - JSONLText.completeLines (the byte-level cutter under all of the above)

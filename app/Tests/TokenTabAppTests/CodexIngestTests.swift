@@ -84,8 +84,13 @@ final class CodexIngestTests: XCTestCase {
         XCTAssertEqual(records.count, expected.count, "record count \(ctx)")
         for (i, e) in expected.enumerated() where i < records.count {
             let r = records[i]
-            XCTAssertEqual(r.messageId, e["messageId"] as? String, "records[\(i)].messageId \(ctx)")
-            XCTAssertEqual(r.requestId, e["requestId"] as? String, "records[\(i)].requestId \(ctx)")
+            // The fixture still documents the synthetic ids the reader is expected to mint;
+            // `UsageRecord` keeps only their fingerprint, so that is what we compare. A reader
+            // that changed either id — the session id or the seq — changes the fingerprint.
+            XCTAssertEqual(r.dedupKey,
+                           UsageRecord.dedupKey(messageId: e["messageId"] as? String,
+                                                requestId: e["requestId"] as? String),
+                           "records[\(i)] dedup identity (messageId+requestId) \(ctx)")
             XCTAssertEqual(r.model, e["model"] as? String, "records[\(i)].model \(ctx)")
             XCTAssertEqual(r.provider, e["provider"] as? String, "records[\(i)].provider \(ctx)")
             XCTAssertEqual(r.isSidechain, (e["isSidechain"] as? Bool) ?? false, "records[\(i)].isSidechain \(ctx)")
@@ -176,8 +181,10 @@ final class CodexIngestTests: XCTestCase {
         XCTAssertEqual(out.records.count, 1)
         XCTAssertEqual(out.malformed, 0,
                        "an unparseable response_item must be skipped before the decoder, not decoded and rejected")
-        // Records carry only whitelisted fields; nothing content-bearing can round-trip through them.
-        let blob = out.records.map { "\($0.messageId ?? "")\($0.model)" }.joined()
+        // Records carry only whitelisted fields; nothing content-bearing can round-trip through
+        // them. Every string a record still holds goes into the blob — the session-derived
+        // messageId that used to be checked here is no longer stored at all, only fingerprinted.
+        let blob = out.records.map { "\($0.model)\($0.provider ?? "")" }.joined()
         XCTAssertFalse(blob.contains("SECRET"), "no content field leaks into records")
         XCTAssertFalse(blob.contains("/secret/path"), "no cwd leaks")
     }
@@ -224,7 +231,10 @@ final class CodexIngestTests: XCTestCase {
         let cold = RecordCache(storeURL: store)
         let first = cold.codexRecords(for: [file])
         XCTAssertEqual(first.records.map(\.provider), ["codex"], "provider is codex")
-        XCTAssertEqual(first.records.first?.messageId, "codex:019ee700-0000-7000-8000-000000000002", "session id from filename fallback")
+        XCTAssertEqual(first.records.first?.dedupKey,
+                       UsageRecord.dedupKey(messageId: "codex:019ee700-0000-7000-8000-000000000002",
+                                            requestId: "token:0"),
+                       "session id from filename fallback")
         XCTAssertEqual(first.codexRateLimits?.primary?.usedPercent, 42, "snapshot from the parse")
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.path), "cold run flushed to disk")
 

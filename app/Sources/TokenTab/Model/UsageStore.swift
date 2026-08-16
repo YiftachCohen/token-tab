@@ -436,6 +436,13 @@ final class UsageStore: ObservableObject {
     private var codexWatcher: FolderWatcher?
     private var displayTimer: Timer?
     private var lastRefresh = Date.distantPast
+    /// Set by every refresh, cleared by the idle reclaim (see `reclaimFreedPages`). Reclaiming
+    /// mid-burst is wasted work — the next refresh in the burst faults the same pages straight
+    /// back in — so the reclaim waits for the activity to stop instead.
+    private var needsReclaim = false
+    /// How long the logs must be quiet before reclaiming. Comfortably inside the 30s tick, so
+    /// the drop lands on the first tick after a session goes idle.
+    private let reclaimIdleDelay: TimeInterval = 25
     /// Set when a refresh is requested while one is already in flight. The
     /// completing refresh re-runs once if this is set, so the final write of a
     /// burst is never dropped (the old guard silently discarded it, leaving
@@ -529,7 +536,12 @@ final class UsageStore: ObservableObject {
 
     private func tick() {
         clock = Date()
-        if Date().timeIntervalSince(lastRefresh) > 90 { refresh() }
+        let idleFor = Date().timeIntervalSince(lastRefresh)
+        if idleFor > 90 { refresh() }
+        else if needsReclaim, idleFor > reclaimIdleDelay {
+            needsReclaim = false
+            Task.detached(priority: .utility) { Self.reclaimFreedPages() }
+        }
     }
 
     func refresh() {
@@ -551,12 +563,14 @@ final class UsageStore: ObservableObject {
             // the granted one, so it exists by construction.
             let claudeOn = Config.providerEnabled("claude", dirExists: true)
             let files = claudeOn ? LogReader.findJSONL(in: dir) : []
+            // One array, sized once for BOTH providers' cached records: the per-refresh flat
+            // copy is ~13 MB on a real history, and growing it from empty (then duplicating it
+            // copy-on-write to append Codex) left tens of MB of freed-but-retained pages.
             var records: [UsageRecord] = []
+            records.reserveCapacity(cache.cachedRecordCount())
             var malformed = 0
             if claudeOn {
-                let cl = cache.records(for: files)
-                records = cl.records
-                malformed = cl.malformed
+                malformed = cache.appendRecords(for: files, into: &records)
             }
 
             // Codex ingestion (provider-gated). Default = every provider whose dir exists; an
@@ -578,8 +592,7 @@ final class UsageStore: ObservableObject {
             if codexActive, let codexRoot = codexDir {
                 let codexFiles = CodexLogReader.findCodexJSONL(in: codexRoot)
                 codexFileCount = codexFiles.count
-                let cx = cache.codexRecords(for: codexFiles)
-                records.append(contentsOf: cx.records)
+                let cx = cache.appendCodexRecords(for: codexFiles, into: &records)
                 malformed += cx.malformed
                 codexRateLimits = cx.codexRateLimits
             }
@@ -589,11 +602,15 @@ final class UsageStore: ObservableObject {
             let malformedTotal = malformed
             let codexFileTotal = codexFileCount
 
-            let agg = aggregate(records,
-                                options: AggregateOptions(now: now0, cap: cap, codexRateLimits: codexRateLimits),
-                                costModel: Pricing())
-            // 60 days covers the 30-day range plus its prior 30-day comparison period.
-            let history = dailyHistory(records, days: 60, now: now0, costModel: Pricing())
+            // One dedup pass feeds both the aggregate and the history series (60 days covers
+            // the 30-day range plus its prior 30-day comparison period). Running them
+            // separately deduped the whole history twice per refresh for identical results —
+            // two ~38 MB transient maps where one ~11 MB map does.
+            let (agg, history) = aggregateWithHistory(
+                records,
+                options: AggregateOptions(now: now0, cap: cap, codexRateLimits: codexRateLimits),
+                historyDays: 60,
+                costModel: Pricing())
             let live = LiveReader.read(logDir: dir)   // opt-in cache; nil when no sidecar runs
             let override = Config.surfaceOverride
             await MainActor.run {
@@ -628,6 +645,7 @@ final class UsageStore: ObservableObject {
                 self.isRefreshing = false
                 self.hasLoadedOnce = true
                 self.lastRefresh = now
+                self.needsReclaim = true
                 self.clock = now
                 // A change landed while we were reading — run exactly once more to
                 // pick it up (further bursts are coalesced by the watcher's debounce).
@@ -637,6 +655,19 @@ final class UsageStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Return malloc's freed-but-retained pages to the OS. `nil` means every zone; a `goal` of
+    /// 0 means "release what you can" rather than a target byte count. Purely an allocator
+    /// hint — it touches no app state, so it is safe from any thread.
+    ///
+    /// This app allocates in bursts (parse + aggregate a long history) and then sits idle for
+    /// minutes. malloc holds the freed pages on its free list rather than returning them, so
+    /// what Activity Monitor reports at rest is the high-water mark of the last refresh, not
+    /// what the app is actually holding — tens of MB of `MALLOC_LARGE (empty)`. Called once the
+    /// logs go quiet, this makes idle footprint track live data.
+    private nonisolated static func reclaimFreedPages() {
+        malloc_zone_pressure_relief(nil, 0)
     }
 
     /// Health is a real throttle signal only when we have a usage % — a fresh live reading

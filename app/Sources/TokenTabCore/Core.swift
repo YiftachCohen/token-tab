@@ -16,11 +16,13 @@ import Foundation
 
 /// One assistant usage record, stripped to the fields we count. Never carries content.
 /// `Codable` so the I/O shell's on-disk record cache can persist parsed records across
-/// launches — the only fields here are opaque ids, the model, token counts, a timestamp
-/// and the sidechain flag, so the cache, like the in-memory model, holds no prompt/code.
+/// launches — the only fields here are a dedup fingerprint, the model, token counts, a
+/// timestamp and the sidechain flag, so the cache, like the in-memory model, holds no
+/// prompt/code. It no longer even holds the message and request ids (see `dedupKey`).
 public struct UsageRecord: Sendable, Codable {
-    public var messageId: String?
-    public var requestId: String?
+    /// Fingerprint of `(messageId, requestId)` — see `UsageRecord.dedupKey(messageId:requestId:)`.
+    /// nil for a line missing either id, which is never collapsed.
+    public var dedupKey: UInt64?
     public var model: String
     public var usage: TokenUsage
     public var timestamp: Date?
@@ -31,13 +33,52 @@ public struct UsageRecord: Sendable, Codable {
 
     public init(messageId: String?, requestId: String?, model: String,
                 usage: TokenUsage, timestamp: Date?, isSidechain: Bool, provider: String? = nil) {
-        self.messageId = messageId
-        self.requestId = requestId
+        self.dedupKey = UsageRecord.dedupKey(messageId: messageId, requestId: requestId)
         self.model = model
         self.usage = usage
         self.timestamp = timestamp
         self.isSidechain = isSidechain
         self.provider = provider
+    }
+
+    /// Reduce a record's two ids to the 64-bit fingerprint that IS its dedup identity — the
+    /// only thing we keep of either id. Returns nil when either is missing or empty, which is
+    /// how a line with no ids stays uncollapsible.
+    ///
+    /// The ids are never displayed, never persisted, and never compared to anything but each
+    /// other; keeping them cost two heap allocations per record (~226k `StringStorage`, ~17 MB
+    /// on a real history) purely so pass 1 could compare a pair of strings. A fingerprint costs
+    /// eight inline bytes and hashes in one word.
+    ///
+    /// Deliberately NOT Swift's `Hasher`, which is seeded per process: this key is written to
+    /// the record cache, so a fingerprint that changed between launches would stop collapsing a
+    /// resumed session's replayed records against their cached originals and silently inflate
+    /// every total. FNV-1a is deterministic; the SplitMix64 finalizer follows because FNV-1a
+    /// alone avalanches poorly in the high bits, and the collision estimate below assumes a
+    /// uniform 64-bit draw.
+    ///
+    /// The cost of this trade, stated plainly: two DIFFERENT id pairs that fingerprint alike
+    /// would merge, dropping one record's tokens. Across ~63k distinct pairs (a 1.1 GB log
+    /// history) that is a ~1-in-10-billion chance, and it degrades one record rather than
+    /// corrupting the file.
+    public static func dedupKey(messageId: String?, requestId: String?) -> UInt64? {
+        guard let messageId, !messageId.isEmpty,
+              let requestId, !requestId.isEmpty else { return nil }
+        let prime: UInt64 = 0x100000001b3
+        var h: UInt64 = 0xcbf29ce484222325          // FNV-1a offset basis
+        func absorb(_ byte: UInt8) {
+            h ^= UInt64(byte)
+            h = h &* prime
+        }
+        for byte in messageId.utf8 { absorb(byte) }
+        absorb(0xFF)                                 // separator, so ("ab","c") ≠ ("a","bc").
+                                                     // 0xFF cannot occur in UTF-8, so it can
+                                                     // never collide with a byte of an id.
+        for byte in requestId.utf8 { absorb(byte) }
+        h ^= h >> 30; h = h &* 0xbf58476d1ce4e5b9    // SplitMix64 finalizer
+        h ^= h >> 27; h = h &* 0x94d049bb133111eb
+        h ^= h >> 31
+        return h
     }
 }
 
@@ -497,21 +538,74 @@ public struct AggregateOptions: Sendable {
 /// Aggregate a stream of usage records into the snapshot the UI renders.
 /// Faithful port of core.mjs `aggregate()`, plus main/sub split, a rolling-1h burn
 /// figure, and a cost-injection hook.
-/// Dedup key for aggregate()/dailyHistory() — a pair, not the JS engine's concatenated
-/// `"${messageId}:${requestId}"` string, so pass 1 hashes the ids it already holds instead
-/// of allocating ~100k fresh key strings per refresh. Same collapses for every id shape
-/// either reader emits: pairs only merge where the concatenation would too (a divergence
-/// would need a messageId ending exactly where another's `:` sits — Claude ids are `msg_…`/
-/// `req_…` and the Codex reader's synthetic ids are uuid- and integer-suffixed, so no real
-/// pair of records can tell the two schemes apart).
-private enum DedupKey: Hashable {
-    case ids(String, String)     // (messageId, requestId), both non-empty
-    case synthetic(Int)          // id-less line: always counted, never collapsed
+/// The result of the shared dedup pass: `order` holds, in FIRST-SEEN order, the index of the
+/// record that WINS each key. Indices into the caller's array rather than copies of the
+/// records themselves — the dedup map used to be `[DedupKey: UsageRecord]` with a
+/// `minimumCapacity` of the record count, which on a real ~115k-record history is a ~38 MB
+/// transient allocation *per call*, and both `aggregate()` and `dailyHistory()` built one
+/// every refresh. Those two spikes, freed but held by malloc as dirty free-list pages, were
+/// most of the app's resident footprint. Now one pass produces one ~11 MB map that both
+/// consumers share (see `aggregateWithHistory`), and pass 2 indexes an array instead of
+/// re-hashing a string pair per record.
+struct Deduped {
+    var order: [Int]
+    var duplicatesDropped: Int
+    var approximate: Bool
+}
+
+/// Dedup, keep-last, first-seen order — the single rule `aggregate()` and `dailyHistory()`
+/// both apply. Streaming emits several usage lines per message sharing a key; output_tokens
+/// GROWS across them, so the FINAL line wins while the slot keeps its first-seen position.
+private func dedupe(_ records: [UsageRecord]) -> Deduped {
+    var slot: [UInt64: Int] = Dictionary(minimumCapacity: records.count)
+    var order: [Int] = []
+    order.reserveCapacity(records.count)
+    var duplicatesDropped = 0
+    var approximate = false
+
+    for (i, r) in records.enumerated() {
+        guard let key = r.dedupKey else {
+            // A line missing an id is always counted, never collapsed.
+            approximate = true
+            order.append(i)
+            continue
+        }
+        if let seen = slot[key] {
+            order[seen] = i               // last-write-wins, in the first-seen position
+            duplicatesDropped += 1
+        } else {
+            slot[key] = order.count
+            order.append(i)
+        }
+    }
+    return Deduped(order: order, duplicatesDropped: duplicatesDropped, approximate: approximate)
+}
+
+/// Aggregate AND bucket the same records into daily history, sharing ONE dedup pass. The two
+/// functions apply an identical pass-1 rule, so running them back to back (as every app
+/// refresh does) deduped the whole history twice for byte-identical results. Output is exactly
+/// what calling `aggregate()` and `dailyHistory()` separately returns — this only stops paying
+/// for the second pass.
+public func aggregateWithHistory(_ records: [UsageRecord],
+                                 options: AggregateOptions = AggregateOptions(),
+                                 historyDays: Int = 60,
+                                 costModel: CostModel? = nil) -> (aggregate: Aggregate, history: [DayUsage]) {
+    let deduped = dedupe(records)
+    return (aggregate(records, deduped: deduped, options: options, costModel: costModel),
+            dailyHistory(records, deduped: deduped, days: historyDays,
+                         now: options.now, costModel: costModel))
 }
 
 public func aggregate(_ records: [UsageRecord],
                       options: AggregateOptions = AggregateOptions(),
                       costModel: CostModel? = nil) -> Aggregate {
+    aggregate(records, deduped: dedupe(records), options: options, costModel: costModel)
+}
+
+private func aggregate(_ records: [UsageRecord],
+                       deduped: Deduped,
+                       options: AggregateOptions,
+                       costModel: CostModel?) -> Aggregate {
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = .current
     let now = options.now
@@ -523,33 +617,9 @@ public func aggregate(_ records: [UsageRecord],
     let rollingCutoff = nowMs - fiveHours
     let hourCutoff = nowMs - oneHour
 
-    // Pass 1 — dedup, keep-last. Key = (messageId, requestId) when both exist; otherwise a
-    // unique key (a line missing an id is always counted, never collapsed). Streaming
-    // emits several usage lines per message sharing a key; output_tokens GROWS across
-    // them, so the FINAL line wins.
-    var kept: [DedupKey: UsageRecord] = Dictionary(minimumCapacity: records.count)
-    var order: [DedupKey] = []        // preserve first-seen order for determinism
-    order.reserveCapacity(records.count)
-    var uniqueCounter = 0
-    var duplicatesDropped = 0
-    var approximate = false
-
-    for r in records {
-        let hasIds = (r.messageId?.isEmpty == false) && (r.requestId?.isEmpty == false)
-        let key: DedupKey
-        if hasIds {
-            key = .ids(r.messageId!, r.requestId!)
-        } else {
-            key = .synthetic(uniqueCounter)
-            uniqueCounter += 1
-            approximate = true
-        }
-        if kept.updateValue(r, forKey: key) != nil {   // last-write-wins
-            duplicatesDropped += 1
-        } else {
-            order.append(key)
-        }
-    }
+    // Pass 1 ran in `dedupe()` — shared with dailyHistory() when both are wanted.
+    let duplicatesDropped = deduped.duplicatesDropped
+    let approximate = deduped.approximate
 
     // Pass 2 — aggregate the deduped records. Combined (all-provider) totals AND
     // per-provider subtotals accumulate side by side, so a Claude-only input produces
@@ -569,8 +639,8 @@ public func aggregate(_ records: [UsageRecord],
     var providerBuckets: [String: ProviderSubtotal] = [:]
     var providerOrder: [String] = []
 
-    for key in order {
-        guard let r = kept[key] else { continue }
+    for index in deduped.order {
+        let r = records[index]
         let sum = r.usage.sum
         agg.counted += 1
         agg.total += sum
@@ -773,35 +843,29 @@ public func dailyHistory(_ records: [UsageRecord],
                          days: Int = 60,
                          now: Date = Date(),
                          costModel: CostModel? = nil) -> [DayUsage] {
+    dailyHistory(records, deduped: dedupe(records), days: days, now: now, costModel: costModel)
+}
+
+private func dailyHistory(_ records: [UsageRecord],
+                          deduped: Deduped,
+                          days: Int,
+                          now: Date,
+                          costModel: CostModel?) -> [DayUsage] {
     guard days > 0 else { return [] }
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = .current
     let nowMs = now.timeIntervalSince1970
 
-    // Pass 1 — dedup, keep-last, first-seen order (mirrors aggregate()).
-    var kept: [DedupKey: UsageRecord] = Dictionary(minimumCapacity: records.count)
-    var order: [DedupKey] = []
-    order.reserveCapacity(records.count)
-    var uniqueCounter = 0
-    for r in records {
-        let hasIds = (r.messageId?.isEmpty == false) && (r.requestId?.isEmpty == false)
-        let key: DedupKey
-        if hasIds {
-            key = .ids(r.messageId!, r.requestId!)
-        } else {
-            key = .synthetic(uniqueCounter)
-            uniqueCounter += 1
-        }
-        if kept.updateValue(r, forKey: key) == nil { order.append(key) }
-    }
+    // Pass 1 ran in `dedupe()` — the same keep-last rule aggregate() applies.
 
     // Pass 2 — sum into per-day buckets keyed by local day.
     var tokensByDay: [Int: Int] = [:]
     var costByDay: [Int: Double] = [:]
     var tokModelByDay: [Int: [String: Int]] = [:]
     var costModelByDay: [Int: [String: Double]] = [:]
-    for key in order {
-        guard let r = kept[key], let ts = r.timestamp else { continue }
+    for index in deduped.order {
+        let r = records[index]
+        guard let ts = r.timestamp else { continue }
         let tms = ts.timeIntervalSince1970
         if tms > nowMs { continue }                       // skip future-dated (clock skew)
         let dk = localDayKey(ts, cal)
