@@ -74,11 +74,19 @@ struct SubscriptionPanel: View {
         quota?.displayResetText
     }
 
+    /// Why the hero stopped being a percentage, said once, where the staleness is already
+    /// admitted. Without the second sentence the ring silently swaps a quota for a clock —
+    /// same size, same position, same green — and the only clue is a caption change.
     private var staleLiveDetail: String {
         guard let capturedAt = snapshot.live?.capturedAt else {
             return "Live · stale — no successful reading yet"
         }
-        return "Live · stale — last successful reading \(Fmt.duration(now.timeIntervalSince(capturedAt))) ago"
+        let age = Fmt.duration(now.timeIntervalSince(capturedAt))
+        if store.calibratedCapIsStale(now: now) {
+            return "Live · stale — last reading \(age) ago. The learned cap expired with it, "
+                 + "so the ring shows time left, not usage."
+        }
+        return "Live · stale — last successful reading \(age) ago"
     }
 
     var body: some View {
@@ -332,10 +340,14 @@ struct SubscriptionPanel: View {
         case .on:
             // Enabled but the cache isn't fresh: right after turning on (first reading is
             // seconds away) or when readings stopped (claude signed out, machine asleep…).
-            HStack(spacing: 6) {
+            // Top-aligned: the expiry copy wraps to two lines, and a dot centered against a
+            // two-line block reads as unanchored rather than as its bullet.
+            HStack(alignment: .top, spacing: 6) {
                 Circle().strokeBorder(Theme.faint, lineWidth: 1).frame(width: 6, height: 6)
+                    .padding(.top, 3.5)
                 Text(snapshot.live == nil ? "Live: on · waiting for the first reading…" : staleLiveDetail)
                     .font(.system(size: 10.5)).foregroundStyle(Theme.faint)
+                    .fixedSize(horizontal: false, vertical: true)   // the expiry sentence wraps
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 17)

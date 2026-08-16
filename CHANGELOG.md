@@ -9,6 +9,28 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+### Fixed
+- **The live helper couldn't run `claude` at all, and said so in a way nobody could act on.**
+  Claude Code ≥2.1 opens a uid-scoped lock dir at `/tmp/claude-<uid>` on startup; the helper's
+  sandbox didn't reach `/tmp`, so every run died with `EPERM` before the `/usage` call — 340
+  consecutive failures over 46 hours in the case that surfaced this. **Trust surface:** the
+  helper's entitlements gain `/private/tmp` read-write (the app binary is untouched — still
+  sandboxed, still no network entitlement). `/tmp` is world-writable, so this grants no reach
+  the helper didn't already have as the user. Its stderr is also no longer sent to
+  `/dev/null`: a failure now logs claude's own last lines instead of a bare `claude exited 1`,
+  which is why this took two days to spot. The parse-miss line gains the output's *length*
+  only — never a snippet, since `/usage` names your skills, plugins and MCP servers.
+- **A learned 5-hour cap no longer outlives its evidence.** The cap is inferred as
+  `windowTokens / sessionPct`, a token count over a model-weighted server percentage, and was
+  persisted with no age — so once live stopped, a ratio learned on a cheaper model mix kept
+  driving the hero indefinitely. Against an all-Opus window that meant `78% left` on screen
+  against a true `42%`. The cap now records when it was learned and expires after 24 hours,
+  falling back to the time countdown the ring already shows with no cap — labelled as the
+  clock, not usage — while the stale-live row states the consequence outright. Manual and
+  `TOKENTAB_WINDOW_CAP` caps are stated intent, not inference, and never expire; a cap
+  persisted by an older build is granted one window from first launch rather than voided. New
+  dated `DESIGN.md` row.
+
 ## [0.4.0] — 2026-08-15
 
 ### Added

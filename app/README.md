@@ -159,9 +159,10 @@ job needs:
 # The app binary: sandbox ON, no network entitlement — same as above, unchanged by Live %:
 codesign -d --entitlements :- "app/Token Tab.app"
 
-# The helper binary: sandbox ON, plus network.client (claude /usage is a network call)
-# and scoped ~/.claude read-write — nothing else. The entitlements file is short; read it
-# at app/Bundle/TokenTabLiveHelper.entitlements:
+# The helper binary: sandbox ON, plus network.client (claude /usage is a network call),
+# scoped ~/.claude read-write, and /private/tmp read-write (Claude Code ≥2.1 opens
+# /tmp/claude-<uid> at startup and exits 1 without it) — nothing else. The entitlements
+# file is short; read it at app/Bundle/TokenTabLiveHelper.entitlements:
 codesign -d --entitlements :- "app/Token Tab.app/Contents/MacOS/TokenTabLiveHelper"
 
 # It only ever runs `claude -p "/usage" --output-format json` — this prints exactly ONE
@@ -215,7 +216,7 @@ app/
 `build-app.sh` assembles the bundle's `Contents/`, which isn't checked in:
 `Contents/MacOS/TokenTab` (the app binary — sandboxed, no network),
 `Contents/MacOS/TokenTabLiveHelper` (the helper — sandboxed too, with network.client +
-scoped ~/.claude; see `Bundle/TokenTabLiveHelper.entitlements`), and
+scoped ~/.claude + /private/tmp; see `Bundle/TokenTabLiveHelper.entitlements`), and
 `Contents/Library/LaunchAgents/com.tokentab.liveagent.plist` (copied straight from
 `Bundle/`).
 

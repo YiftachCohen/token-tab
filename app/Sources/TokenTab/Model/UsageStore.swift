@@ -421,11 +421,49 @@ final class UsageStore: ObservableObject {
         didSet { UserDefaults.standard.set(calibratedCap, forKey: "calibratedCap") }
     }
 
+    /// When `calibratedCap` was learned — the thing that decides whether it is still evidence.
+    /// NOT interchangeable with the live cache's `capturedAt`: a reading below `minPct` is
+    /// cached but declines to calibrate, so the newest reading on disk can be hours fresher
+    /// than the cap actually in force.
+    @Published private(set) var calibratedCapAt: Date? {
+        didSet {
+            UserDefaults.standard.set(calibratedCapAt?.timeIntervalSince1970 ?? 0,
+                                      forKey: "calibratedCapAt")
+        }
+    }
+
+    /// How long a learned cap keeps earning the hero figure.
+    ///
+    /// `cap ≈ tokens / sessionPct` is a token count divided by a MODEL-WEIGHTED server
+    /// percentage, so it only holds while the mix that produced it holds. A day is chosen to
+    /// ride out the things that legitimately interrupt live — an overnight sleep, a missed
+    /// helper run, a signed-out CLI someone fixes in the morning — while refusing to let one
+    /// reading underwrite a percentage indefinitely. Measured against a real outage: a cap
+    /// learned on a cheaper mix survived a 46-hour helper failure and headlined "78% left"
+    /// against a true 42%, because nothing in the app ever asked how old it was.
+    static let calibratedCapMaxAge: TimeInterval = 24 * 3600
+
+    /// The learned cap has outlived the reading that justified it. Only meaningful when there
+    /// IS one; a missing timestamp is treated as expired (the migration in `init` stamps any
+    /// pre-upgrade cap with `now`, so this can't retroactively void a cap already in use).
+    func calibratedCapIsStale(now: Date) -> Bool {
+        guard calibratedCap > 0 else { return false }
+        guard let at = calibratedCapAt else { return true }
+        return now.timeIntervalSince(at) > Self.calibratedCapMaxAge
+    }
+
     /// The cap fed to the aggregator, by precedence: a manual override wins (explicit intent),
-    /// then the live-calibrated cap, then env/dotfile config.
+    /// then the live-calibrated cap while it is still current, then env/dotfile config.
+    ///
+    /// Letting an expired cap fall through to 0 is deliberate: `WindowStats.quotaLeftPercent()`
+    /// then returns nil, `quotaLeft` goes nil with it, and the ring/menu bar fall back to the
+    /// time countdown they already show when no cap is configured — labelled as the clock, not
+    /// as usage. That is the same rule DESIGN.md sets for an expired Codex window: a number we
+    /// can no longer stand behind stops being a percentage everywhere at once, rather than
+    /// staying on screen looking authoritative.
     var effectiveCap: Int {
         if capOverride > 0 { return capOverride }
-        if calibratedCap > 0 { return calibratedCap }
+        if calibratedCap > 0, !calibratedCapIsStale(now: Date()) { return calibratedCap }
         return Config.windowCap
     }
 
@@ -467,7 +505,22 @@ final class UsageStore: ObservableObject {
         let scopeRaw = UserDefaults.standard.string(forKey: "menuBarScope") ?? MenuBarScope.both.rawValue
         self.menuBarScope = MenuBarScope(rawValue: scopeRaw) ?? .both
         self.capOverride = UserDefaults.standard.integer(forKey: "windowCap")        // 0 when unset
-        self.calibratedCap = UserDefaults.standard.integer(forKey: "calibratedCap")  // 0 when unset
+        let storedCap = UserDefaults.standard.integer(forKey: "calibratedCap")       // 0 when unset
+        self.calibratedCap = storedCap
+        // Caps persisted before this key existed have no age. Voiding them on sight would
+        // strip the % from anyone whose live helper is off — they'd never get it back, since
+        // only a live reading re-learns it. So grant one full window from first launch and let
+        // it expire normally from there: honest, and self-correcting the moment live returns.
+        // The write is explicit because property observers don't run during init — leaving it
+        // to `didSet` would re-stamp `now` on every launch and make the cap immortal.
+        let stampedAt = UserDefaults.standard.double(forKey: "calibratedCapAt")
+        if stampedAt > 0 {
+            self.calibratedCapAt = Date(timeIntervalSince1970: stampedAt)
+        } else if storedCap > 0 {
+            let migrated = Date()
+            self.calibratedCapAt = migrated
+            UserDefaults.standard.set(migrated.timeIntervalSince1970, forKey: "calibratedCapAt")
+        }
         // Codex defaults ON (mirrors the "provider whose dir exists is on" default); an
         // explicit `false` in defaults is the only way it's off (once the user toggled it).
         self.codexEnabled = (UserDefaults.standard.object(forKey: "codexEnabled") as? Bool) ?? true
@@ -634,10 +687,13 @@ final class UsageStore: ObservableObject {
                 // Admissibility — freshness AND same-block membership — lives in Core's
                 // `calibrateCap(from:window:now:)`, which `--probe` calls too, so the
                 // diagnostic can never advertise a cap this loop would refuse to learn.
-                if let l = live,
-                   let learned = calibrateCap(from: l, window: agg.window, now: now),
-                   learned != self.calibratedCap {
-                    self.calibratedCap = learned
+                // The timestamp is refreshed on every admissible reading, INCLUDING one that
+                // re-learns the same number: what expires is the evidence, not the value, and a
+                // steady cap confirmed a minute ago is the best-supported cap there is. Stamping
+                // only on change would retire a cap precisely because it kept being right.
+                if let l = live, let learned = calibrateCap(from: l, window: agg.window, now: now) {
+                    if learned != self.calibratedCap { self.calibratedCap = learned }
+                    self.calibratedCapAt = now
                 }
                 self.codexReadable = codexReadable
                 self.claudeActive = claudeOn
