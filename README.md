@@ -360,7 +360,10 @@ it automatically (see [above](#the-5-hour-window)).
 network entitlement — unchanged, kernel-enforced. The helper is a *separate* binary in
 the same bundle, **also App-Sandboxed** (macOS requires it: a sandboxed app may only
 register sandboxed agents), opened exactly as far as its one job needs — the network
-client entitlement for the `claude /usage` call plus scoped read-write on `~/.claude`
+client entitlement for the `claude /usage` call, scoped read-write on `~/.claude`, and
+read-write on `/private/tmp` (Claude Code ≥2.1 opens a lock dir at `/tmp/claude-<uid>` on
+startup and refuses to run without it; `/tmp` is world-writable anyway, so this grants no
+reach the helper didn't already have as your user)
 ([`app/Bundle/TokenTabLiveHelper.entitlements`](app/Bundle/TokenTabLiveHelper.entitlements)
 is short; read it). It is never spawned by the app (`launchd` runs it) and only runs at
 all once you flip Live % on. `app/README.md`'s audit shows this in two commands: the

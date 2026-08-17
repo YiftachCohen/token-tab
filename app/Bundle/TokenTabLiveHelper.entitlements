@@ -9,8 +9,16 @@
        - ~/.claude read-write: claude's own config/credentials/state live there, and the
          cache file this helper writes (<logDir>/.token-tab-live.json) does too;
        - read-only paths: the usual claude/node install locations, so the helper can
-         exec the CLI (the child inherits this same sandbox).
-     Everything else stays sealed: no user files, no other folders, no keychain groups. -->
+         exec the CLI (the child inherits this same sandbox);
+       - /private/tmp read-write: Claude Code ≥2.1 opens a uid-scoped lock/state dir at
+         /tmp/claude-<uid> on startup and exits 1 if it can't (`EPERM: operation not
+         permitted, open '/tmp/claude-501'`). It is NOT derived from TMPDIR, so the
+         container's own tmp can't stand in for it; without this the child dies before
+         it ever reaches the /usage call. `/private/` is the canonical path the sandbox
+         matches against — `/tmp` is only a symlink to it.
+     Everything else stays sealed: no user files, no other folders, no keychain groups.
+     /private/tmp is world-writable by design, so opening it grants no access to anything
+     the helper couldn't already reach as this user. -->
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <true/>
@@ -36,6 +44,10 @@
     <array>
         <string>/opt/homebrew/</string>
         <string>/usr/local/</string>
+    </array>
+    <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+    <array>
+        <string>/private/tmp/</string>
     </array>
 </dict>
 </plist>

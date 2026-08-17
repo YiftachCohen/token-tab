@@ -146,12 +146,26 @@ func runClaudeUsage(bin: URL, timeout: TimeInterval = 60) -> String? {
     childEnv["HOME"] = home.path
     proc.environment = childEnv
     let stdout = Pipe()
+    // stderr used to go to /dev/null, which made every failure log the same opaque
+    // "claude exited N" — a sandbox denial (EPERM on /tmp/claude-<uid>), a signed-out CLI
+    // and a broken install were indistinguishable, and one of them sat unnoticed for two
+    // days. Capture it and quote claude's own last words in the failure line instead.
+    let stderr = Pipe()
     proc.standardOutput = stdout
-    proc.standardError = FileHandle.nullDevice
+    proc.standardError = stderr
     proc.standardInput = FileHandle.nullDevice   // never block waiting on stdin
     do { try proc.run() } catch {
         log("spawn failed: \(error.localizedDescription)")
         return nil
+    }
+
+    // Drain stderr on its own queue: two pipes read in sequence would deadlock the child
+    // whenever the one we aren't reading yet fills its buffer.
+    let errBox = OutputBox()
+    let errDone = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+        errBox.set(stderr.fileHandleForReading.readDataToEndOfFile())
+        errDone.signal()
     }
 
     // Watchdog: SIGTERM past the deadline. Terminating also closes the pipe, so the
@@ -168,15 +182,47 @@ func runClaudeUsage(bin: URL, timeout: TimeInterval = 60) -> String? {
     // Drain stdout BEFORE waitUntilExit (a full pipe buffer would deadlock the child).
     let data = stdout.fileHandleForReading.readDataToEndOfFile()
     proc.waitUntilExit()
+    errDone.wait()
     watchdog.cancel()
 
     guard proc.terminationStatus == 0 else {
         log(timeoutState.didTimeOut
             ? "claude timed out after \(Int(timeout))s"
-            : "claude exited \(proc.terminationStatus)")
+            : "claude exited \(proc.terminationStatus)\(diagnosticSuffix(errBox.get()))")
         return nil
     }
     return String(data: data.prefix(256 * 1024), encoding: .utf8)
+}
+
+/// claude's stderr, squeezed into one log line: last non-empty lines, whitespace collapsed,
+/// hard-capped. The log self-trims at 64 KB and a failing helper writes every 5 minutes, so
+/// an unbounded dump would evict its own history before anyone read it.
+func diagnosticSuffix(_ err: Data, maxLines: Int = 3, maxChars: Int = 300) -> String {
+    guard let text = String(data: err.suffix(8 * 1024), encoding: .utf8) else { return "" }
+    let lines = text
+        .split(whereSeparator: \.isNewline)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    guard !lines.isEmpty else { return "" }
+    var joined = lines.suffix(maxLines).joined(separator: " / ")
+    if joined.count > maxChars { joined = String(joined.prefix(maxChars)) + "…" }
+    return " — \(joined)"
+}
+
+/// A `Sendable` box so the stderr drain can hand its result back across the queue hop.
+final class OutputBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func set(_ value: Data) {
+        lock.lock(); defer { lock.unlock() }
+        data = value
+    }
+
+    func get() -> Data {
+        lock.lock(); defer { lock.unlock() }
+        return data
+    }
 }
 
 /// `Process.terminate()` can make a CLI wrapper report exit 143 instead of an uncaught
@@ -236,7 +282,10 @@ guard let output = runClaudeUsage(bin: bin) else {
 }
 guard let reading = LiveParse.parseUsageOutput(output),
       let json = serialize(reading, capturedAt: Date()) else {
-    log("parse miss — `claude /usage` output not recognized; wrote nothing")
+    // Size only, never a snippet: `/usage` output names the user's skills, plugins and MCP
+    // servers, and "never read content" has to hold for what we WRITE too. The length still
+    // separates the two real causes — an empty/error response vs. a changed output format.
+    log("parse miss — `claude /usage` output not recognized (\(output.count) chars); wrote nothing")
     exit(1)
 }
 let target = cacheURL()
