@@ -33,10 +33,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let helper: LiveHelperManager
     private let selection = MenuSelectionState()
 
-    private var statusItem: NSStatusItem?
+    /// These two are internal rather than private so StatusItemAppearanceTests can present the
+    /// real dropdown, read back the appearance it resolved to, and take its status item out of
+    /// the menu bar again afterwards.
+    private(set) var statusItem: NSStatusItem?
     private var hostingView: MeasuringHostingView<MenuBarLabelHost>?
-    private var popover: NSPopover?
+    private(set) var popover: NSPopover?
     private var storeObserver: AnyCancellable?
+    /// Keeps the pinned dropdown appearance (see togglePopover) following the system's. An
+    /// explicit `appearance` is an override, so without this a Mac on Auto that crosses
+    /// sunset with the dropdown open would hold the old palette until it was reopened.
+    private var appearanceObserver: NSKeyValueObservation?
     /// One pending re-measure at a time: both triggers (a store publish and a SwiftUI size
     /// invalidation) can fire several times per update, and re-measuring resizes the button,
     /// which can invalidate again. Coalescing keeps that from becoming a treadmill.
@@ -93,6 +100,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         storeObserver = store.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in self?.scheduleLengthUpdate() }
         }
+        // Re-pin, don't un-pin: clearing the override would drop the popover straight back to
+        // inheriting the vibrantDark status-bar window (the bug the pin exists for).
+        appearanceObserver = NSApp.observe(\.effectiveAppearance) { [weak self] app, _ in
+            Task { @MainActor in self?.popover?.appearance = app.effectiveAppearance }
+        }
     }
 
     /// Re-measure on the next main-actor turn — after SwiftUI has applied whatever change
@@ -117,14 +129,54 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         item.length = width
     }
 
-    @objc private func togglePopover() {
+    @objc func togglePopover() {
         if let open = popover, open.isShown {
             open.performClose(nil)
+            // Give the keyboard back, HERE and nowhere else. Opening the dropdown activates
+            // this app (below); an accessory app has no windows, so once the popover is gone
+            // "active" means keystrokes land nowhere and the editor the user came from stays
+            // unfocused until they click it.
+            //
+            // This is the one dismissal we originate, which is what makes it safe. Doing it
+            // from `popoverDidClose` instead covers every dismissal — including the one where
+            // the grant flow puts a modal NSOpenPanel on screen, which is itself an outside
+            // interaction that dismisses a `.transient` popover. An NSOpenPanel is
+            // `canHide == true` like any window, so hiding there takes the permission picker
+            // away with it and the user cannot grant access at all. No state check rescues
+            // that: `NSApp.modalWindow` is set while `popoverDidClose` runs but reads nil one
+            // main-actor turn later, so a deferred guard hid the picker on every observed run,
+            // and `isActive` is a coin flip (powerbox sometimes deactivates us first). The
+            // popover is already closed while that panel is up, so this branch — which only
+            // runs to CLOSE a shown popover — cannot collide with it.
+            //
+            // Cost: dismissals we don't originate no longer restore focus. Clicking another
+            // app already moved focus there, so the only real gap is Escape, after which the
+            // user clicks where they want to type.
+            if NSApp.isActive { NSApp.hide(nil) }
             return
         }
         guard let button = statusItem?.button else { return }
         let p = popover ?? makePopover()
+        // A popover anchored to a status item inherits its appearance from the STATUS BAR
+        // window, not from the app — and that window is `vibrantDark` whenever the menu bar
+        // is light-on-dark, which in Light Mode it is over any dark desktop picture. The
+        // panel then rendered its whole dark palette (near-white ink, cool blue-greys) on a
+        // light-mode desktop. Pinning the popover to the app's own effective appearance is
+        // what makes the dropdown follow the SYSTEM's light/dark, which is what every
+        // `Theme.dynamic` color resolves against. Re-applied on each open so a light↔dark
+        // switch between openings is picked up.
+        p.appearance = NSApp.effectiveAppearance
         p.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
+        // Clicking a status item does NOT activate an accessory app, so the dropdown came up
+        // in a non-key window of a background app: the glass material rendered in its flat
+        // inactive grey, and the Settings cap field couldn't take a keystroke until the user
+        // clicked it a second time. Activating and taking key status makes it a real panel.
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        p.contentViewController?.view.window?.makeKey()
         selection.isOpen = true
         button.highlight(true)
     }
@@ -144,6 +196,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         Task { @MainActor in
             self.selection.isOpen = false
             self.statusItem?.button?.highlight(false)
+            // Deliberately does NOT hide the app to hand focus back — see togglePopover's
+            // close branch for why that has to happen only on the dismissal we originate.
         }
     }
 }
