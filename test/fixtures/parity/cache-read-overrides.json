@@ -1,0 +1,40 @@
+{
+  "name": "per-model cache-read multipliers: Fable 5.1 0.025x, Opus 5.5 0.05x, everything else the 0.10x provider default (future-dated, so windows stay idle)",
+  "now": "2026-06-01T00:00:00Z",
+  "cap": 0,
+  "records": [
+    {
+      "messageId": "ca", "requestId": "rca", "model": "claude-fable-5-1",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000000, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "cb", "requestId": "rcb", "model": "claude-opus-5-5[1m]",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000000, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "cc", "requestId": "rcc", "model": "opus",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 1000000, "cache_read_input_tokens": 1000000, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    },
+    {
+      "messageId": "cd", "requestId": "rcd", "model": "claude-fable-5",
+      "usage": { "input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000000, "output_tokens": 0 },
+      "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false
+    }
+  ],
+  "expect": {
+    "total": 5000000,
+    "cost": {
+      "total": 6.65,
+      "byModel": {
+        "claude-fable-5-1": 0.25,
+        "claude-opus-5-5": 0.2,
+        "opus": 5.2,
+        "claude-fable-5": 1
+      },
+      "unpricedTokens": 0
+    }
+  }
+}

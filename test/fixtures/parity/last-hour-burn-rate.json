@@ -1,6 +1,6 @@
 {
   "name": "last hour (burn rate) -> combined lastHourTokens vs each provider's own lastHour",
-  "_comment": "The burn-rate window, which is what every 'tok/hr' and '$/hr' figure and both pace projections are built on. Codex traffic in the trailing hour is 300000 tokens / $1.75 of the combined 720000 / $3.25 — so a panel under a Claude heading that reads the combined figure overstates Claude's pace by 71%. providers.claude.lastHour (420000 / $1.50) is the only honest source for it. Also pins the half-open (now-1h, now] boundary: the record stamped EXACTLY one hour before `now` is excluded, matching rolling5h's rule in both engines. today/thisWeek/cost.today are deliberately unpinned — the records sit on the local-calendar boundary of `now`, so they are timezone-dependent; every field pinned here is pure elapsed time.",
+  "_comment": "The burn-rate window, which is what every 'tok/hr' and '$/hr' figure and both pace projections are built on. Codex traffic in the trailing hour is 300000 tokens / $1.75 of the combined 720000 / $2.75 — so a panel under a Claude heading that reads the combined figure overstates Claude's pace by 71%. providers.claude.lastHour (420000 / $1.00) is the only honest source for it. Also pins the half-open (now-1h, now] boundary: the record stamped EXACTLY one hour before `now` is excluded, matching rolling5h's rule in both engines. today/thisWeek/cost.today are deliberately unpinned — the records sit on the local-calendar boundary of `now`, so they are timezone-dependent; every field pinned here is pure elapsed time.",
   "now": "2026-06-01T00:00:00Z",
   "cap": 0,
   "records": [
@@ -34,9 +34,9 @@
     "byModel": { "claude-sonnet-5": 570000, "gpt-5.2-codex": 300000 },
     "window": { "active": true, "tokens": 570000, "calibratedCap": 0, "resetMs": 1780281000000, "pct": null },
     "cost": {
-      "total": 3.7,
-      "lastHour": 3.25,
-      "byModel": { "claude-sonnet-5": 1.95, "gpt-5.2-codex": 1.75 },
+      "total": 3.05,
+      "lastHour": 2.75,
+      "byModel": { "claude-sonnet-5": 1.3, "gpt-5.2-codex": 1.75 },
       "unpricedTokens": 0
     },
     "providerOrder": ["claude", "codex"],
@@ -46,7 +46,7 @@
         "byClass": { "input": 550000, "cacheCreate": 0, "cacheRead": 0, "output": 20000 },
         "byModel": { "claude-sonnet-5": 570000 },
         "bySurface": { "subscription": 570000 },
-        "cost": { "total": 1.95, "rolling5h": 1.95, "lastHour": 1.5 }
+        "cost": { "total": 1.3, "rolling5h": 1.3, "lastHour": 1 }
       },
       "codex": {
         "total": 300000, "rolling5h": 300000, "lastHour": 300000,

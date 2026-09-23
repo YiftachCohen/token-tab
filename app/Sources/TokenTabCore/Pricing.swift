@@ -5,7 +5,9 @@
 // Rates are USD per MILLION tokens. Input and output are per model; the two cache classes
 // are derived from the input rate using PER-PROVIDER multipliers (cache economics differ
 // between vendors — see `cacheMultipliers` below):
-//   Claude: write = 1.25× input (5-minute-TTL cache write), read = 0.10× input.
+//   Claude: write = 1.25× input (5-minute-TTL cache write), read = 0.10× input — except
+//        where Anthropic publishes a model-specific read multiplier (Opus 5.5: 0.05×,
+//        Fable 5.1: 0.025×), carried on the entry as `cacheRead`.
 //   Codex (OpenAI): write = 0 (no separate cache-write billing step), read = 0.10× input.
 //
 // Unknown models are NEVER invented a price for: `cost` returns priced:false and the
@@ -24,22 +26,29 @@ public struct Pricing: CostModel {
         "codex": CacheMult(write: 0, read: 0.10),
     ]
 
-    private struct Rate { let input: Double; let output: Double }
+    /// `cacheRead`, when set, is a per-model cache-read multiplier overriding the provider's.
+    private struct Rate {
+        let input: Double
+        let output: Double
+        var cacheRead: Double? = nil
+    }
 
     // input / output USD per 1M tokens (Anthropic list pricing). Mirrors RATES in pricing.mjs.
     private static let rates: [String: Rate] = [
         // Current models.
+        "claude-fable-5-1": Rate(input: 10, output: 50, cacheRead: 0.025),
+        "claude-opus-5-5": Rate(input: 4, output: 20, cacheRead: 0.05),
+        // Sonnet 5: the $2/$10 launch price was made the standard list price (the scheduled
+        // 2026-09-01 increase to $3/$15 was cancelled).
+        "claude-sonnet-5": Rate(input: 2, output: 10),
+        "claude-haiku-4-5": Rate(input: 1, output: 5),
+        // Previous generation, still available.
         "claude-fable-5": Rate(input: 10, output: 50),
         "claude-opus-5": Rate(input: 5, output: 25),
         "claude-opus-4-8": Rate(input: 5, output: 25),
         "claude-opus-4-7": Rate(input: 5, output: 25),
         "claude-opus-4-6": Rate(input: 5, output: 25),
-        // Sonnet 5 list price. Anthropic is running a $2/$10 introductory rate through
-        // 2026-08-31, but the table isn't date-aware and documents itself as list pricing —
-        // the intro discount would silently go stale on 2026-09-01. (Same as Sonnet 4.6.)
-        "claude-sonnet-5": Rate(input: 3, output: 15),
         "claude-sonnet-4-6": Rate(input: 3, output: 15),
-        "claude-haiku-4-5": Rate(input: 1, output: 5),
         // Older, still-billable models.
         "claude-opus-4-5": Rate(input: 5, output: 25),
         "claude-opus-4-1": Rate(input: 15, output: 75),
@@ -50,7 +59,7 @@ public struct Pricing: CostModel {
     ]
 
     private static let aliases: [String: String] = [
-        "opus": "claude-opus-5",
+        "opus": "claude-opus-5-5",
         "sonnet": "claude-sonnet-5",
         "haiku": "claude-haiku-4-5",
     ]
@@ -175,7 +184,7 @@ public struct Pricing: CostModel {
         let mult = cacheMultipliers[provider] ?? cacheMultipliers["claude"]!
         return ClassRates(input: base.input,
                           cacheWrite: base.input * mult.write,
-                          cacheRead: base.input * mult.read,
+                          cacheRead: base.input * (base.cacheRead ?? mult.read),
                           output: base.output)
     }
 

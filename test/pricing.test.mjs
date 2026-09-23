@@ -58,14 +58,22 @@ test("dated snapshot suffix is stripped (haiku-4-5-20251001 -> haiku-4-5)", () =
 });
 
 test("bare family aliases resolve to the current model in that family", () => {
-  assert.equal(costOfUsage(oneMillion.output, "sonnet").usd, 15); // -> sonnet-5
+  assert.equal(costOfUsage(oneMillion.output, "sonnet").usd, 10); // -> sonnet-5
+  assert.equal(costOfUsage(oneMillion.output, "opus").usd, 20); // -> opus-5-5
 });
 
-test("Sonnet 5 is priced at the $3/$15 list rate (intro discount not modeled)", () => {
-  assert.equal(costOfUsage(oneMillion.input, "claude-sonnet-5").usd, 3);
-  assert.equal(costOfUsage(oneMillion.output, "claude-sonnet-5").usd, 15);
+test("Sonnet 5 is priced at the $2/$10 list rate (the launch price made permanent)", () => {
+  assert.equal(costOfUsage(oneMillion.input, "claude-sonnet-5").usd, 2);
+  assert.equal(costOfUsage(oneMillion.output, "claude-sonnet-5").usd, 10);
   // "sonnet" now aliases to Sonnet 5, so canonicalization + alias agree.
   assert.equal(canonicalModelId("claude-sonnet-5"), "claude-sonnet-5");
+});
+
+test("per-model cache-read multipliers override the provider default", () => {
+  // Opus 5.5 reads at 0.05x input, Fable 5.1 at 0.025x; writes keep the 1.25x default.
+  assert.deepEqual(ratesFor("claude-opus-5-5"), { input: 4, cacheWrite: 5, cacheRead: 0.2, output: 20 });
+  assert.deepEqual(ratesFor("claude-fable-5-1[1m]"), { input: 10, cacheWrite: 12.5, cacheRead: 0.25, output: 50 });
+  assert.equal(costOfUsage(oneMillion.cacheRead, "opus").usd, 0.2);
 });
 
 test("older still-billable models are priced (Opus 4.1 higher tier, Opus/Sonnet 4.5, Haiku 3.5)", () => {

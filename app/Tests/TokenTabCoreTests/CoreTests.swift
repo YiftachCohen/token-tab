@@ -263,12 +263,24 @@ final class CoreTests: XCTestCase {
     }
 
     func testPricingSonnet5() {
-        // sonnet-5: $3/$15 list rate (intro discount not modeled). "sonnet" aliases to it.
+        // sonnet-5: $2/$10 list rate (the launch price made permanent). "sonnet" aliases to it.
         let direct = Pricing().cost(u(1_000_000, 0, 0, 1_000_000), model: "claude-sonnet-5")
         XCTAssertTrue(direct.priced)
-        XCTAssertEqual(direct.usd, 18, accuracy: 1e-12) // 3 input + 15 output
+        XCTAssertEqual(direct.usd, 12, accuracy: 1e-12) // 2 input + 10 output
         let alias = Pricing().cost(u(0, 0, 0, 1_000_000), model: "sonnet")
-        XCTAssertEqual(alias.usd, 15, accuracy: 1e-12)
+        XCTAssertEqual(alias.usd, 10, accuracy: 1e-12)
+    }
+
+    func testPricingPerModelCacheReadOverride() {
+        // Opus 5.5 reads at 0.05x input, Fable 5.1 at 0.025x; writes keep the 1.25x default.
+        let opus = Pricing().cost(u(0, 1_000_000, 1_000_000, 0), model: "claude-opus-5-5")
+        XCTAssertEqual(opus.usd, 5.2, accuracy: 1e-12) // 4 x 1.25 write + 4 x 0.05 read
+        let fable = Pricing().cost(u(0, 0, 1_000_000, 0), model: "claude-fable-5-1[1m]")
+        XCTAssertEqual(fable.usd, 0.25, accuracy: 1e-12)
+        let alias = Pricing().cost(u(0, 0, 1_000_000, 0), model: "opus")
+        XCTAssertEqual(alias.usd, 0.2, accuracy: 1e-12)
+        XCTAssertEqual(Fmt.modelName("claude-opus-5-5"), "Opus 5.5")
+        XCTAssertEqual(Fmt.modelName("claude-fable-5-1"), "Fable 5.1")
     }
 
     func testPricingMemoizesRepeatedModelResolution() {
