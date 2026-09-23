@@ -9,6 +9,8 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-23
+
 ### Added
 - **Rates for Claude Opus 5.5 ($4/$20) and Claude Fable 5.1 ($10/$50).** Both publish a
   cheaper cache-read multiplier than the 0.10× default: 0.05× on Opus 5.5 and 0.025× on
@@ -19,6 +21,17 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 ### Changed
 - **Claude Sonnet 5 is priced at $2/$10, down from $3/$15.** Anthropic made the launch price
   the standard list price and cancelled the 2026-09-01 increase to $3/$15.
+- **The app's idle memory drops from 131–140 MB to 53 MB** (peak 216 → 70 MB) against a
+  ~115k-record history. Refreshes now run dedup once, over indices, and share it between the
+  aggregate and the daily history. Each record keeps a 64-bit fingerprint of its
+  (message id, request id) pair in place of the two strings. **Trust surface:** Swift dedup is
+  now probabilistic. Two distinct id pairs with the same fingerprint would merge and drop one
+  record's tokens; across ~50k pairs that is about 1 in 10 billion. On a frozen 1.1 GB history
+  it collapses exactly the records the JS engine's exact string keys collapse, and every
+  `--probe` total matches `node src/token-tab.mjs --json`. The fingerprint is FNV-1a plus a
+  SplitMix64 finalizer, stable across launches, because it is persisted. The on-disk
+  cache moves to `record-cache-v4` (27 → 20 MB) and older stores are discarded. The JS engine,
+  the parsed fields and the network posture are unchanged.
 
 ### Fixed
 - **The live helper couldn't run `claude` at all, and said so in a way nobody could act on.**
@@ -41,6 +54,15 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
   `TOKENTAB_WINDOW_CAP` caps are stated intent, not inference, and never expire; a cap
   persisted by an older build is granted one window from first launch rather than voided. New
   dated `DESIGN.md` row.
+- **The dropdown rendered its dark palette in Light Mode** whenever the menu bar was
+  light-on-dark, for example over a dark desktop picture: the popover inherited the status bar's
+  `vibrantDark` appearance. It is now pinned to the app's own appearance and follows the system
+  if it changes while open. The panel also opened inactive, with flat grey glass and a Settings
+  cap field that dropped the first keystroke. It now activates on open and hides the app when
+  it closes the popover itself, so the keyboard returns to the previous app.
+- **The loading tally stayed at 0 while the logs were read.** Its timer was re-created every
+  frame inside the loader's `TimelineView` and never fired; the count now follows the same
+  clock as the arc. View-layer only.
 
 ## [0.4.0] — 2026-08-15
 
