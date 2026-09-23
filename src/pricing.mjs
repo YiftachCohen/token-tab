@@ -10,7 +10,9 @@
 // cache economics differ between vendors — see CACHE_MULTIPLIERS below):
 //   Claude: cache WRITE (cache_creation_input_tokens) = 1.25x input — the 5-minute-TTL
 //        write rate. The logs don't record the TTL, so we assume 5m (what ccusage assumes too).
-//        cache READ (cache_read_input_tokens) = 0.10x input.
+//        cache READ (cache_read_input_tokens) = 0.10x input — except where Anthropic publishes
+//        a model-specific read multiplier (Opus 5.5: 0.05x, Fable 5.1: 0.025x), which the
+//        entry carries as `cacheRead` and which overrides the provider default.
 //   Codex (OpenAI): cache WRITE = 0 (OpenAI doesn't bill a separate cache-write step —
 //        prompt caching is automatic and free to populate). cache READ = 0.10x input,
 //        same ratio as Claude (verified against OpenAI's pricing page).
@@ -35,20 +37,23 @@ const CACHE_MULTIPLIERS = {
 // (e.g. Haiku 3) and synthetic ids fall through to unpriced on purpose — a guessed figure
 // is worse than an honest "no rate." The 1M-context tier ([1m] suffix) is standard-priced
 // on current models (no long-context premium), so it shares the base rate — normalizeModel
-// strips the suffix before lookup.
+// strips the suffix before lookup. An optional `cacheRead` is a per-model cache-read
+// multiplier that overrides CACHE_MULTIPLIERS for that model only.
 const RATES = {
   // Current models.
+  "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.025 },
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.05 },
+  // Sonnet 5: the $2/$10 launch price was made the standard list price (the scheduled
+  // 2026-09-01 increase to $3/$15 was cancelled).
+  "claude-sonnet-5": { input: 2, output: 10 },
+  "claude-haiku-4-5": { input: 1, output: 5 },
+  // Previous generation, still available.
   "claude-fable-5": { input: 10, output: 50 },
   "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
   "claude-opus-4-6": { input: 5, output: 25 },
-  // Sonnet 5 list price. Anthropic is running a $2/$10 introductory rate through
-  // 2026-08-31, but the table isn't date-aware and documents itself as list pricing —
-  // the intro discount would silently go stale on 2026-09-01. (Same as Sonnet 4.6.)
-  "claude-sonnet-5": { input: 3, output: 15 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
   // Older, still-billable models. canonicalModelId reduces dated/Bedrock ids to these keys
   // (e.g. claude-sonnet-4-20250514 and anthropic.claude-sonnet-4-...-v1:0 -> claude-sonnet-4).
   "claude-opus-4-5": { input: 5, output: 25 },
@@ -62,7 +67,7 @@ const RATES = {
 // Bare aliases Claude Code sometimes writes (e.g. "sonnet") resolve to the current
 // model in that family. This is the same family→latest mapping the official tooling uses.
 const ALIASES = {
-  opus: "claude-opus-5",
+  opus: "claude-opus-5-5",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 };
@@ -160,7 +165,7 @@ export function ratesFor(model, provider = "claude") {
   return {
     input: base.input,
     cacheWrite: base.input * mult.write,
-    cacheRead: base.input * mult.read,
+    cacheRead: base.input * (base.cacheRead ?? mult.read),
     output: base.output,
   };
 }

@@ -11,7 +11,8 @@
 // changes, the zero-entries guard below fails loudly rather than passing silently).
 //
 // Both engines keep ONE table per provider (Claude list pricing, OpenAI/Codex list
-// pricing) plus per-provider cache multipliers, so every comparison below is scoped to a
+// pricing) plus per-provider cache multipliers (with optional per-model cache-read
+// overrides), so every comparison below is scoped to a
 // provider — a Codex model must never be checked against the Claude table.
 //
 // Run by ci.yml. No dependencies, no network — same rules as everything else here.
@@ -51,9 +52,10 @@ function parseRates(name) {
   if (src === null) return null;
   const out = {};
   for (const m of src.matchAll(
-    /"([\w.-]+)":\s*Rate\(input:\s*([\d.]+),\s*output:\s*([\d.]+)\)/g,
+    /"([\w.-]+)":\s*Rate\(input:\s*([\d.]+),\s*output:\s*([\d.]+)(?:,\s*cacheRead:\s*([\d.]+))?\)/g,
   )) {
     out[m[1]] = { input: Number(m[2]), output: Number(m[3]) };
+    if (m[4] !== undefined) out[m[1]].cacheRead = Number(m[4]);
   }
   return out;
 }
@@ -163,13 +165,19 @@ for (const [provider, decls] of Object.entries(PROVIDERS)) {
     err(`[${provider}] no cacheMultipliers entry in Pricing.swift`);
     continue;
   }
-  const probe = ratesFor(jsRated[0], provider);
-  const jsWrite = probe.cacheWrite / probe.input;
-  const jsRead = probe.cacheRead / probe.input;
-  if (jsWrite !== sw.write)
-    err(`[${provider}] cache-write multiplier drift: JS ${jsWrite}, Swift ${sw.write}`);
-  if (jsRead !== sw.read)
-    err(`[${provider}] cache-read multiplier drift: JS ${jsRead}, Swift ${sw.read}`);
+  // Cache-read can be overridden per model (Rate(..., cacheRead:)), so compare the
+  // resolved per-class rate of every model rather than probing one.
+  for (const id of jsRated) {
+    const js = ratesFor(id, provider);
+    const r = swiftRates[id];
+    if (!r) continue;
+    const swWrite = r.input * sw.write;
+    const swRead = r.input * (r.cacheRead ?? sw.read);
+    if (js.cacheWrite !== swWrite)
+      err(`[${provider}] cache-write drift for ${id}: JS ${js.cacheWrite}, Swift ${swWrite}`);
+    if (js.cacheRead !== swRead)
+      err(`[${provider}] cache-read drift for ${id}: JS ${js.cacheRead}, Swift ${swRead}`);
+  }
 }
 
 // A provider priced in Swift but absent from PROVIDERS above would never be compared.

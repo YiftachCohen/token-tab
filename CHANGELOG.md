@@ -9,6 +9,17 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+### Added
+- **Rates for Claude Opus 5.5 ($4/$20) and Claude Fable 5.1 ($10/$50).** Both publish a
+  cheaper cache-read multiplier than the 0.10× default: 0.05× on Opus 5.5 and 0.025× on
+  Fable 5.1. Rate entries can now carry a per-model `cacheRead` that overrides the provider
+  default, in both engines, and the drift check compares every model's resolved cache rates.
+  The bare `opus` alias now resolves to Opus 5.5.
+
+### Changed
+- **Claude Sonnet 5 is priced at $2/$10, down from $3/$15.** Anthropic made the launch price
+  the standard list price and cancelled the 2026-09-01 increase to $3/$15.
+
 ### Fixed
 - **The live helper couldn't run `claude` at all, and said so in a way nobody could act on.**
   Claude Code ≥2.1 opens a uid-scoped lock dir at `/tmp/claude-<uid>` on startup; the helper's
