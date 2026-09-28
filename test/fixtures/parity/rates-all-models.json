@@ -7,6 +7,7 @@
     { "messageId": "ra01", "requestId": "rr01", "model": "claude-fable-5",    "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
     { "messageId": "ra18", "requestId": "rr18", "model": "claude-fable-5-1",  "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
     { "messageId": "ra19", "requestId": "rr19", "model": "claude-opus-5-5",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
+    { "messageId": "ra20", "requestId": "rr20", "model": "claude-sonnet-5-5", "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
     { "messageId": "ra17", "requestId": "rr17", "model": "claude-opus-5",     "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
     { "messageId": "ra02", "requestId": "rr02", "model": "claude-opus-4-8",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
     { "messageId": "ra03", "requestId": "rr03", "model": "claude-opus-4-7",   "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false },
@@ -25,17 +26,18 @@
     { "messageId": "ra16", "requestId": "rr16", "model": "haiku",             "usage": { "input_tokens": 1000000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1000000 }, "timestamp": "2026-06-20T12:00:00Z", "isSidechain": false }
   ],
   "expect": {
-    "total": 38000000,
+    "total": 40000000,
     "today": 0,
     "thisWeek": 0,
     "rolling5h": 0,
-    "bySurface": { "subscription": 38000000, "bedrock": 0, "untracked": 0 },
+    "bySurface": { "subscription": 40000000, "bedrock": 0, "untracked": 0 },
     "cost": {
-      "total": 592.8,
+      "total": 604.8,
       "today": 0,
       "byModel": {
         "claude-fable-5-1": 60,
         "claude-opus-5-5": 24,
+        "claude-sonnet-5-5": 12,
         "claude-fable-5": 60,
         "claude-opus-5": 30,
         "claude-opus-4-8": 30,

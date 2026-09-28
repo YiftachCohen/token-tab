@@ -9,6 +9,10 @@ versioning: [SemVer](https://semver.org) (0.x — minor bumps may change behavio
 
 ## [Unreleased]
 
+### Added
+- **Rate for Claude Sonnet 5.5 ($2/$10).** Standard 0.10× cache-read multiplier. The bare
+  `sonnet` alias now resolves to Sonnet 5.5 (same price as Sonnet 5, so alias costs are unchanged).
+
 ## [0.5.0] — 2026-09-23
 
 ### Added

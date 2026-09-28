@@ -38,6 +38,7 @@ public struct Pricing: CostModel {
         // Current models.
         "claude-fable-5-1": Rate(input: 10, output: 50, cacheRead: 0.025),
         "claude-opus-5-5": Rate(input: 4, output: 20, cacheRead: 0.05),
+        "claude-sonnet-5-5": Rate(input: 2, output: 10),
         // Sonnet 5: the $2/$10 launch price was made the standard list price (the scheduled
         // 2026-09-01 increase to $3/$15 was cancelled).
         "claude-sonnet-5": Rate(input: 2, output: 10),
@@ -60,7 +61,7 @@ public struct Pricing: CostModel {
 
     private static let aliases: [String: String] = [
         "opus": "claude-opus-5-5",
-        "sonnet": "claude-sonnet-5",
+        "sonnet": "claude-sonnet-5-5",
         "haiku": "claude-haiku-4-5",
     ]
 
